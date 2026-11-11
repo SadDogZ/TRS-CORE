@@ -1,0 +1,37 @@
+{
+  "name": "credentials-tracker",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "app/api",
+    "app/web"
+  ],
+  "scripts": {
+    "db:up": "docker compose up -d mysql",
+    "db:migrate": "npm run migrate -w @app/api",
+    "db:generate": "npm run generate -w @app/api",
+    "db:seed": "npm run seed -w @app/api",
+    "db:demo": "npm run seed:demo -w @app/api",
+    "db:reset": "npm run reset -w @app/api",
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build -w @app/web",
+    "start": "npm run build && npm start -w @app/api",
+    "typecheck": "tsc -p shared && tsc -p app/api && tsc -p app/web",
+    "test": "npm test -w shared && npm test -w @app/api",
+    "db:studio": "npm run studio -w @app/api"
+  },
+  "devDependencies": {
+    "prisma": "^7.10.1",
+    "typescript": "^5.9.3"
+  },
+  "allowScripts": {
+    "esbuild@0.24.2": true,
+    "@prisma/client@5.22.0": true,
+    "prisma@5.22.0": true,
+    "@prisma/engines@5.22.0": true
+  },
+  "dependencies": {
+    "@prisma/client": "^7.10.1",
+    "esbuild": "0.28.2"
+  }
+}

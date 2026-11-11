@@ -1,0 +1,789 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+model User {
+  id                                Int                         @id @default(autoincrement())
+  fullName                          String                      @db.VarChar(200)
+  login                             String                      @unique @db.VarChar(50)
+  passwordHash                      String                      @db.VarChar(255)
+  phone                             String?                     @db.VarChar(50)
+  email                             String?                     @db.VarChar(150)
+  photoFile                         String?                     @db.VarChar(100)
+  photoMime                         String?                     @db.VarChar(50)
+  isActive                          Boolean                     @default(true)
+  isDeleted                         Boolean                     @default(false)
+  mustChangePassword                Boolean                     @default(true)
+  tokenVersion                      Int                         @default(0)
+  uiSettings                        Json?
+  createdAt                         DateTime                    @default(now())
+  updatedAt                         DateTime                    @updatedAt
+  positionId                        Int?
+  auditAsActor                      AuditLog[]                  @relation("AuditActor")
+  auditAsTarget                     AuditLog[]                  @relation("AuditTarget")
+  sentMessages                      Message[]
+  notifications                     Notification[]
+  position                          Position?                   @relation(fields: [positionId], references: [id])
+  updatedCredentials                UserCredential[]            @relation("CredentialEditor")
+  credentials                       UserCredential[]            @relation("CredentialOwner")
+  radarCards                        RadarCard[]
+  ifoProposals                      IfoProposal[]               @relation("IfoProposer")
+  workSchedule                      WorkScheduleEntry[]
+  workScheduleIntervals              WorkScheduleInterval[]
+  scheduleTemplates                 ScheduleTemplate[]
+  schedulePeriods                   SchedulePeriod[]
+  employee                          Employee?
+  systemRoles                       UserSystemRole[]            @relation("AccountSystemRoles")
+  grantedSystemRoles                UserSystemRole[]            @relation("SystemRoleGrantActor")
+  createdAssignments                EmployeeAssignment[]        @relation("AssignmentCreator")
+  createdOrgChanges                 OrganizationChange[]        @relation("OrgChangeActor")
+  createdBases                      Base[]                      @relation("BaseCreator")
+  createdMines                      Mine[]                      @relation("MineCreator")
+  createdMineCoordinatorAssignments MineCoordinatorAssignment[] @relation("MineCoordinatorAssignmentCreator")
+  createdWells                      Well[]                      @relation("WellCreator")
+  createdContracts                  Contract[]                  @relation("ContractCreator")
+  createdContractDocuments          ContractDocument[]          @relation("ContractDocumentCreator")
+  createdAddenda                    ContractAddendum[]          @relation("AddendumCreator")
+  createdWork                       WorkExecution[]             @relation("WorkCreator")
+  createdCustomerSiteWorks          CustomerSiteWork[]          @relation("CustomerSiteWorkCreator")
+  createdPlannedWorks               PlannedWork[]                @relation("PlannedWorkCreator")
+
+  @@index([positionId], map: "User_positionId_fkey")
+}
+
+/// Справочник должностей
+model Position {
+  id          Int                  @id @default(autoincrement())
+  name        String               @unique @db.VarChar(150)
+  systemRoleId Int
+  sortOrder   Int                  @default(0)
+  isArchived  Boolean              @default(false)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  systemRole  SystemRole           @relation(fields: [systemRoleId], references: [id], onDelete: Restrict)
+  users       User[]
+  assignments EmployeeAssignment[]
+
+  @@index([systemRoleId])
+}
+
+/// Existing User rows remain the authentication account/API compatibility boundary.
+/// Employee is the distinct personnel card; relationships are never inferred from Position.
+model Employee {
+  id                          Int                         @id @default(autoincrement())
+  userId                      Int                         @unique
+  employeeNumber              String?                     @unique @db.VarChar(50)
+  createdAt                   DateTime                    @default(now())
+  updatedAt                   DateTime                    @updatedAt
+  user                        User                        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  assignments                 EmployeeAssignment[]        @relation("AssignmentEmployee")
+  supervised                  EmployeeAssignment[]        @relation("AssignmentSupervisor")
+  mineAssignments             MineCoordinatorAssignment[]
+  responsibleFor              WorkExecutionResponsible[]
+  changes                     OrganizationChange[]
+  supervisedCustomerSiteWorks CustomerSiteWork[]          @relation("CustomerSiteWorkSupervisor")
+  coordinatedPlannedWorks     PlannedWork[]               @relation("PlannedWorkCoordinator")
+  supervisedPlannedWorks      PlannedWork[]               @relation("PlannedWorkSupervisor")
+  assignedPlannedWorks        PlannedWorkEmployee[]
+
+  @@index([userId])
+}
+
+model Base {
+  id              Int                  @id @default(autoincrement())
+  name            String               @unique @db.VarChar(150)
+  code            String?              @unique @db.VarChar(50)
+  isActive        Boolean              @default(true)
+  createdById     Int?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  createdBy       User?                @relation("BaseCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  assignments     EmployeeAssignment[]
+  mines           Mine[]
+  contracts       Contract[]
+  plannedWorks    PlannedWork[]
+
+  @@index([isActive, name])
+}
+
+model AssignmentStatus {
+  id          Int                  @id @default(autoincrement())
+  code        String               @unique @db.VarChar(50)
+  name        String               @db.VarChar(100)
+  isActive    Boolean              @default(true)
+  sortOrder   Int                  @default(0)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  assignments EmployeeAssignment[]
+
+  @@index([isActive, sortOrder])
+}
+
+model SystemRole {
+  id          Int              @id @default(autoincrement())
+  code        String           @unique @db.VarChar(50)
+  name        String           @db.VarChar(100)
+  description String           @db.Text
+  isActive    Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  users       UserSystemRole[]
+  positions   Position[]
+
+  @@index([isActive, code])
+}
+
+model UserSystemRole {
+  id                 Int        @id @default(autoincrement())
+  userId             Int
+  systemRoleId       Int
+  currentUserRoleKey String?    @unique @db.VarChar(100)
+  globalRoleKey      String?    @unique @db.VarChar(50)
+  assignedAt         DateTime   @default(now())
+  revokedAt          DateTime?
+  assignedById       Int?
+  user               User       @relation("AccountSystemRoles", fields: [userId], references: [id], onDelete: Restrict)
+  systemRole         SystemRole @relation(fields: [systemRoleId], references: [id], onDelete: Restrict)
+  assignedBy         User?      @relation("SystemRoleGrantActor", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  @@index([systemRoleId, userId])
+  @@index([userId, revokedAt])
+  @@index([assignedById, assignedAt])
+}
+
+enum OrganizationTrack {
+  TRS
+  R_AND_M
+  UNASSIGNED
+}
+
+model EmployeeAssignment {
+  id                   Int               @id @default(autoincrement())
+  employeeId           Int
+  positionId           Int?
+  baseId               Int?
+  supervisorEmployeeId Int?
+  statusId             Int
+  track                OrganizationTrack @default(UNASSIGNED)
+  startsAt             DateTime          @db.Date
+  endsAt               DateTime?         @db.Date
+  activeEmployeeId     Int?              @unique
+  reason               String?           @db.Text
+  operationId          String            @db.VarChar(36)
+  createdById          Int?
+  createdAt            DateTime          @default(now())
+  employee             Employee          @relation("AssignmentEmployee", fields: [employeeId], references: [id], onDelete: Restrict)
+  position             Position?         @relation(fields: [positionId], references: [id], onDelete: Restrict)
+  base                 Base?             @relation(fields: [baseId], references: [id], onDelete: Restrict)
+  supervisor           Employee?         @relation("AssignmentSupervisor", fields: [supervisorEmployeeId], references: [id], onDelete: Restrict)
+  status               AssignmentStatus  @relation(fields: [statusId], references: [id], onDelete: Restrict)
+  createdBy            User?             @relation("AssignmentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([employeeId, startsAt, endsAt])
+  @@index([baseId, track, startsAt, endsAt])
+  @@index([supervisorEmployeeId, startsAt, endsAt])
+  @@index([positionId])
+  @@index([statusId])
+  @@index([operationId])
+}
+
+model OrganizationChange {
+  id          Int      @id @default(autoincrement())
+  employeeId  Int
+  actorId     Int?
+  action      String   @db.VarChar(50)
+  previous    Json?
+  next        Json?
+  reason      String?  @db.Text
+  operationId String   @db.VarChar(36)
+  createdAt   DateTime @default(now())
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  actor       User?    @relation("OrgChangeActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([employeeId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([operationId])
+}
+
+model Mine {
+  id                     Int                         @id @default(autoincrement())
+  baseId                 Int
+  name                   String                      @db.VarChar(150)
+  code                   String?                     @db.VarChar(50)
+  isActive               Boolean                     @default(true)
+  createdById            Int?
+  createdAt              DateTime                    @default(now())
+  updatedAt              DateTime                    @updatedAt
+  base                   Base                        @relation(fields: [baseId], references: [id], onDelete: Restrict)
+  createdBy              User?                       @relation("MineCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  coordinatorAssignments MineCoordinatorAssignment[]
+  wells                  Well[]
+  customerSiteWorks      CustomerSiteWork[]
+  plannedWorks           PlannedWork[]
+
+  @@unique([baseId, name])
+  @@unique([baseId, code])
+  @@index([baseId, isActive])
+}
+
+model MineCoordinatorAssignment {
+  id            Int       @id @default(autoincrement())
+  mineId        Int
+  coordinatorId Int
+  currentMineId Int?      @unique
+  startsAt      DateTime  @db.Date
+  endsAt        DateTime? @db.Date
+  operationId   String    @db.VarChar(36)
+  createdById   Int?
+  createdAt     DateTime  @default(now())
+  mine          Mine      @relation(fields: [mineId], references: [id], onDelete: Restrict)
+  coordinator   Employee  @relation(fields: [coordinatorId], references: [id], onDelete: Restrict)
+  createdBy     User?     @relation("MineCoordinatorAssignmentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([mineId, startsAt, endsAt])
+  @@index([coordinatorId, startsAt, endsAt])
+  @@index([operationId])
+}
+
+model Well {
+  id                Int                 @id @default(autoincrement())
+  mineId            Int
+  name              String              @db.VarChar(150)
+  code              String?             @db.VarChar(50)
+  clusterNumber     String?             @db.VarChar(50)
+  isActive          Boolean             @default(true)
+  createdById       Int?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  mine              Mine                @relation(fields: [mineId], references: [id], onDelete: Restrict)
+  createdBy         User?               @relation("WellCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  contractBases     WellContractBasis[]
+  executions        WorkExecution[]
+  customerSiteWorks CustomerSiteWork[]
+  plannedWorks      PlannedWork[]
+
+  @@unique([mineId, name])
+  @@unique([mineId, code])
+  @@index([mineId, isActive])
+}
+
+model Customer {
+  id                Int                @id @default(autoincrement())
+  name              String             @db.VarChar(200)
+  code              String?            @unique @db.VarChar(50)
+  isActive          Boolean            @default(true)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  contracts         Contract[]
+  customerSiteWorks CustomerSiteWork[]
+  radarCards        RadarCard[]
+
+  @@index([name, isActive])
+}
+
+model ContractStatus {
+  id         Int        @id @default(autoincrement())
+  code       String     @unique @db.VarChar(50)
+  name       String     @db.VarChar(100)
+  allowsWork Boolean    @default(false)
+  isActive   Boolean    @default(true)
+  sortOrder  Int        @default(0)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  contracts  Contract[]
+}
+
+model Contract {
+  id          Int                      @id @default(autoincrement())
+  customerId  Int
+  baseId      Int
+  statusId    Int
+  number      String                   @db.VarChar(100)
+  startsAt    DateTime                 @db.Date
+  endsAt      DateTime                 @db.Date
+  createdById Int?
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  customer    Customer                 @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  base        Base                     @relation(fields: [baseId], references: [id], onDelete: Restrict)
+  status      ContractStatus           @relation(fields: [statusId], references: [id], onDelete: Restrict)
+  createdBy   User?                    @relation("ContractCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  addenda     ContractAddendum[]
+  wellBases   WellContractBasis[]
+  permissions ContractWorkPermission[]
+  executions  WorkExecution[]
+  documents   ContractDocument[]
+
+  @@unique([baseId, number])
+  @@index([customerId, statusId])
+  @@index([baseId, startsAt, endsAt])
+  @@index([statusId, startsAt, endsAt])
+}
+
+model ContractDocument {
+  id          Int      @id @default(autoincrement())
+  contractId  Int
+  name        String   @db.VarChar(255)
+  storedFile  String   @unique @db.VarChar(255)
+  mime        String   @db.VarChar(50)
+  createdById Int?
+  createdAt   DateTime @default(now())
+  contract    Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  createdBy   User?    @relation("ContractDocumentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([contractId, createdAt])
+}
+
+model AddendumStatus {
+  id         Int                @id @default(autoincrement())
+  code       String             @unique @db.VarChar(50)
+  name       String             @db.VarChar(100)
+  allowsWork Boolean            @default(false)
+  isActive   Boolean            @default(true)
+  sortOrder  Int                @default(0)
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  addenda    ContractAddendum[]
+}
+
+model ContractAddendum {
+  id              Int                      @id @default(autoincrement())
+  contractId      Int
+  statusId        Int
+  number          String                   @db.VarChar(100)
+  startsAt        DateTime                 @db.Date
+  endsAt          DateTime                 @db.Date
+  description     String                   @db.Text
+  createdById     Int?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  contract        Contract                 @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  status          AddendumStatus           @relation(fields: [statusId], references: [id], onDelete: Restrict)
+  createdBy       User?                    @relation("AddendumCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  wellBases       WellContractBasis[]
+  workPermissions AddendumWorkPermission[]
+  executions      WorkExecution[]
+
+  @@unique([contractId, number])
+  @@index([contractId, startsAt, endsAt])
+  @@index([statusId, startsAt, endsAt])
+}
+
+model AddendumWorkPermission {
+  id         Int              @id @default(autoincrement())
+  addendumId Int
+  workTypeId Int
+  isAllowed  Boolean
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  addendum   ContractAddendum @relation(fields: [addendumId], references: [id], onDelete: Restrict)
+  workType   WorkType         @relation(fields: [workTypeId], references: [id], onDelete: Restrict)
+
+  @@unique([addendumId, workTypeId])
+  @@index([workTypeId, isAllowed])
+}
+
+model WellContractBasis {
+  id            Int               @id @default(autoincrement())
+  wellId        Int
+  contractId    Int?
+  addendumId    Int?
+  currentWellId Int?              @unique
+  startsAt      DateTime          @db.Date
+  endsAt        DateTime?         @db.Date
+  operationId   String            @db.VarChar(36)
+  createdAt     DateTime          @default(now())
+  well          Well              @relation(fields: [wellId], references: [id], onDelete: Restrict)
+  contract      Contract?         @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  addendum      ContractAddendum? @relation(fields: [addendumId], references: [id], onDelete: Restrict)
+
+  @@index([wellId, startsAt, endsAt])
+  @@index([contractId])
+  @@index([addendumId])
+  @@index([operationId])
+}
+
+model WorkType {
+  id                         Int                      @id @default(autoincrement())
+  code                       String                   @unique @db.VarChar(50)
+  name                       String                   @db.VarChar(150)
+  requiresContractPermission Boolean                  @default(true)
+  isActive                   Boolean                  @default(true)
+  createdAt                  DateTime                 @default(now())
+  updatedAt                  DateTime                 @updatedAt
+  contractPermissions        ContractWorkPermission[]
+  addendumPermissions        AddendumWorkPermission[]
+  executions                 WorkExecution[]
+  plannedWorks               PlannedWork[]
+}
+
+model ContractWorkPermission {
+  id         Int      @id @default(autoincrement())
+  contractId Int
+  workTypeId Int
+  isAllowed  Boolean
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  contract   Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  workType   WorkType @relation(fields: [workTypeId], references: [id], onDelete: Restrict)
+
+  @@unique([contractId, workTypeId])
+  @@index([workTypeId, isAllowed])
+}
+
+model WorkStatus {
+  id                 Int              @id @default(autoincrement())
+  code               String           @unique @db.VarChar(50)
+  name               String           @db.VarChar(100)
+  isActive           Boolean          @default(true)
+  sortOrder          Int              @default(0)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  executions         WorkExecution[]
+  plannedWorks       PlannedWork[]
+}
+
+model WorkExecution {
+  id          Int                        @id @default(autoincrement())
+  wellId      Int
+  workTypeId  Int
+  contractId  Int
+  addendumId  Int?
+  statusId    Int
+  performedAt DateTime                   @db.Date
+  description String?                    @db.Text
+  createdById Int?
+  createdAt   DateTime                   @default(now())
+  updatedAt   DateTime                   @updatedAt
+  well        Well                       @relation(fields: [wellId], references: [id], onDelete: Restrict)
+  workType    WorkType                   @relation(fields: [workTypeId], references: [id], onDelete: Restrict)
+  contract    Contract                   @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  addendum    ContractAddendum?          @relation(fields: [addendumId], references: [id], onDelete: Restrict)
+  status      WorkStatus                 @relation(fields: [statusId], references: [id], onDelete: Restrict)
+  createdBy   User?                      @relation("WorkCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  customerSiteWorkId Int?
+  customerSiteWork CustomerSiteWork?     @relation(fields: [customerSiteWorkId], references: [id], onDelete: SetNull)
+  responsible WorkExecutionResponsible[]
+
+  @@index([wellId, performedAt])
+  @@index([contractId, performedAt])
+  @@index([addendumId, performedAt])
+  @@index([workTypeId, performedAt])
+  @@index([statusId, performedAt])
+  @@index([customerSiteWorkId, performedAt])
+}
+
+model WorkExecutionResponsible {
+  id         Int           @id @default(autoincrement())
+  workId     Int
+  employeeId Int
+  work       WorkExecution @relation(fields: [workId], references: [id], onDelete: Restrict)
+  employee   Employee      @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@unique([workId, employeeId])
+  @@index([employeeId, workId])
+}
+
+enum WorkLocationType {
+  BASE
+  CLUSTER
+  WELL
+}
+
+model PlannedWork {
+  id                   Int                   @id @default(autoincrement())
+  baseId               Int
+  mineId               Int?
+  locationType         WorkLocationType      @default(WELL)
+  clusterNumber        String?               @db.VarChar(50)
+  wellId               Int?
+  workTypeId           Int?
+  statusId             Int
+  name                 String                @db.VarChar(200)
+  startsAt             DateTime              @db.Date
+  endsAt               DateTime              @db.Date
+  description          String?               @db.Text
+  coordinatorEmployeeId Int
+  supervisorEmployeeId Int
+  createdById          Int?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  base                 Base                  @relation(fields: [baseId], references: [id], onDelete: Restrict)
+  mine                 Mine?                 @relation(fields: [mineId], references: [id], onDelete: Restrict)
+  well                 Well?                 @relation(fields: [wellId], references: [id], onDelete: Restrict)
+  workType             WorkType?             @relation(fields: [workTypeId], references: [id], onDelete: Restrict)
+  status               WorkStatus            @relation(fields: [statusId], references: [id], onDelete: Restrict)
+  coordinator          Employee              @relation("PlannedWorkCoordinator", fields: [coordinatorEmployeeId], references: [id], onDelete: Restrict)
+  supervisor           Employee              @relation("PlannedWorkSupervisor", fields: [supervisorEmployeeId], references: [id], onDelete: Restrict)
+  createdBy            User?                 @relation("PlannedWorkCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  employees            PlannedWorkEmployee[]
+
+  @@index([baseId, startsAt, endsAt])
+  @@index([baseId, clusterNumber, startsAt])
+  @@index([mineId, startsAt, endsAt])
+  @@index([wellId])
+  @@index([workTypeId, startsAt])
+  @@index([statusId, startsAt])
+  @@index([coordinatorEmployeeId])
+  @@index([supervisorEmployeeId])
+}
+
+model PlannedWorkEmployee {
+  plannedWorkId Int
+  employeeId    Int
+  plannedWork   PlannedWork @relation(fields: [plannedWorkId], references: [id], onDelete: Cascade)
+  employee      Employee    @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@id([plannedWorkId, employeeId])
+  @@index([employeeId, plannedWorkId])
+}
+
+model CustomerSiteWork {
+  id                   Int      @id @default(autoincrement())
+  name                 String   @db.VarChar(200)
+  customerId           Int
+  mineId               Int
+  clusterNumber        String   @db.VarChar(50)
+  wellId               Int
+  startsAt             DateTime @db.Date
+  expectedEndAt        DateTime @db.Date
+  supervisorEmployeeId Int
+  createdById          Int?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  customer             Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  mine                 Mine     @relation(fields: [mineId], references: [id], onDelete: Restrict)
+  well                 Well     @relation(fields: [wellId], references: [id], onDelete: Restrict)
+  supervisor           Employee @relation("CustomerSiteWorkSupervisor", fields: [supervisorEmployeeId], references: [id], onDelete: Restrict)
+  createdBy            User?    @relation("CustomerSiteWorkCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  executions           WorkExecution[]
+
+  @@index([mineId, startsAt, expectedEndAt])
+  @@index([wellId, startsAt, expectedEndAt])
+  @@index([supervisorEmployeeId, startsAt, expectedEndAt])
+  @@index([customerId])
+}
+
+/// Справочник удостоверений: название и срок действия
+model Credential {
+  id              Int              @id @default(autoincrement())
+  name            String           @db.VarChar(200)
+  validityMonths  Int
+  sortOrder       Int              @default(0)
+  isArchived      Boolean          @default(false)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  userCredentials UserCredential[]
+}
+
+/// Конкретное удостоверение конкретного сотрудника
+model UserCredential {
+  id                  Int        @id @default(autoincrement())
+  userId              Int
+  credentialId        Int
+  number              String?    @db.VarChar(100)
+  issueDate           DateTime?  @db.Date
+  expiryDate          DateTime?  @db.Date
+  comment             String?    @db.Text
+  isMarkedForDeletion Boolean    @default(false)
+  updatedById         Int?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+  photoFile           String?    @db.VarChar(100)
+  photoMime           String?    @db.VarChar(50)
+  credential          Credential @relation(fields: [credentialId], references: [id])
+  updatedBy           User?      @relation("CredentialEditor", fields: [updatedById], references: [id])
+  user                User       @relation("CredentialOwner", fields: [userId], references: [id])
+
+  @@unique([userId, credentialId])
+  @@index([expiryDate])
+  @@index([credentialId], map: "UserCredential_credentialId_fkey")
+  @@index([updatedById], map: "UserCredential_updatedById_fkey")
+}
+
+/// Карта безопасности «Радар»
+model RadarCard {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  customerId      Int?
+  customerName    String   @db.VarChar(200)
+  mainInfo        String   @db.Text
+  event           String   @db.Text
+  actionsTaken    String   @db.Text
+  incidentDate    DateTime @db.Date
+  requiredActions String?  @db.Text
+  stoppedWork     Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id])
+  customer        Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([incidentDate])
+  @@index([userId, incidentDate])
+  @@index([customerId])
+}
+
+model IfoProposal {
+  id              Int      @id @default(autoincrement())
+  proposerId      Int
+  title           String   @db.VarChar(300)
+  problem         String   @db.Text
+  proposal        String   @db.Text
+  expectedBenefit String   @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  proposer        User     @relation("IfoProposer", fields: [proposerId], references: [id])
+
+  @@index([createdAt])
+  @@index([proposerId, createdAt])
+}
+
+model ScheduleTemplate {
+  id         Int       @id @default(autoincrement())
+  userId     Int
+  name       String    @db.VarChar(200)
+  workDays   Int
+  restDays   Int
+  cycleStart DateTime  @db.Date
+  validFrom  DateTime  @db.Date
+  validTo    DateTime? @db.Date
+  isActive   Boolean   @default(true)
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, validFrom])
+}
+
+model SchedulePeriod {
+  id        Int                  @id @default(autoincrement())
+  userId    Int
+  type      SchedulePeriodType
+  status    SchedulePeriodStatus @default(PLANNED)
+  startDate DateTime             @db.Date
+  endDate   DateTime             @db.Date
+  note      String?              @db.Text
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, startDate, endDate])
+}
+
+model WorkScheduleEntry {
+  id        Int           @id @default(autoincrement())
+  userId    Int
+  date      DateTime      @db.Date
+  status    WorkDayStatus
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  updatedAt DateTime      @updatedAt
+
+  @@unique([userId, date])
+  @@index([date])
+}
+
+model WorkScheduleInterval {
+  id        Int           @id @default(autoincrement())
+  userId    Int
+  startDate DateTime      @db.Date
+  endDate   DateTime      @db.Date
+  status    WorkDayStatus
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, startDate, endDate])
+  @@index([startDate, endDate])
+}
+
+model Notification {
+  id          Int              @id @default(autoincrement())
+  userId      Int
+  kind        NotificationKind
+  level       String?          @db.VarChar(10)
+  title       String           @db.VarChar(300)
+  body        String           @db.Text
+  link        String?          @db.VarChar(300)
+  messageId   Int?
+  dedupKey    String?          @unique
+  readAt      DateTime?
+  createdAt   DateTime         @default(now())
+  dismissedAt DateTime?
+  message     Message?         @relation(fields: [messageId], references: [id])
+  user        User             @relation(fields: [userId], references: [id])
+
+  @@index([userId, readAt])
+  @@index([messageId], map: "Notification_messageId_fkey")
+}
+
+model Message {
+  id          Int            @id @default(autoincrement())
+  senderId    Int
+  subject     String         @db.VarChar(200)
+  body        String         @db.Text
+  isBroadcast Boolean        @default(false)
+  createdAt   DateTime       @default(now())
+  sender      User           @relation(fields: [senderId], references: [id])
+  deliveries  Notification[]
+
+  @@index([senderId], map: "Message_senderId_fkey")
+}
+
+model AuditLog {
+  id           Int      @id @default(autoincrement())
+  actorId      Int?
+  action       String   @db.VarChar(50)
+  entityType   String   @db.VarChar(50)
+  entityId     Int?
+  targetUserId Int?
+  diff         Json?
+  createdAt    DateTime @default(now())
+  actor        User?    @relation("AuditActor", fields: [actorId], references: [id])
+  targetUser   User?    @relation("AuditTarget", fields: [targetUserId], references: [id])
+
+  @@index([createdAt])
+  @@index([targetUserId])
+  @@index([actorId], map: "AuditLog_actorId_fkey")
+}
+
+model Setting {
+  key   String @id @db.VarChar(50)
+  value String @db.VarChar(200)
+}
+
+enum SchedulePeriodType {
+  WORK
+  REST
+  VACATION
+  SICK_LEAVE
+  ABSENCE
+  UNDETERMINED
+}
+
+enum SchedulePeriodStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum WorkDayStatus {
+  WORK
+  FREE_SHIFT
+  TRAVEL
+  SICK_LEAVE
+  VACATION
+  TRAINING
+}
+
+enum NotificationKind {
+  EXPIRY
+  MESSAGE
+  DIGEST
+  ORGANIZATION
+}

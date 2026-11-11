@@ -1,0 +1,371 @@
+import { useMemo, useState } from 'react';
+import { api, errorMessage } from '../../core/api.ts';
+import type { PositionDto } from '@app/shared';
+import { useCurrentUser } from '../../core/auth.tsx';
+import { invalidate, useAction, useQuery } from '../../core/data.ts';
+import { Alert, Icon, PageHeader, SelectField, TextField } from '@app/shared/ui';
+import { ActionError } from '../../widgets/feedback/ActionError';
+
+interface Base { id: number; name: string; code: string | null }
+interface Position extends PositionDto {}
+interface SystemRole { id: number; code: string; name: string; isActive: boolean }
+interface Employee {
+  id: number;
+  user: {
+    id: number;
+    fullName: string;
+    login: string;
+    isActive: boolean;
+    isDeleted: boolean;
+    systemRoles: { systemRole: SystemRole }[];
+  };
+  assignments: {
+    id: number;
+    positionId: number | null;
+    baseId: number | null;
+    supervisorEmployeeId: number | null;
+    track: 'TRS' | 'R_AND_M' | 'UNASSIGNED';
+    startsAt: string;
+    position: Position | null;
+    base: Base | null;
+    supervisor: { user: { fullName: string } } | null;
+  }[];
+  mineAssignments?: { mine: { id: number; name: string } }[];
+}
+interface Mine { id: number; name: string; code: string | null; baseId: number; base: Base; coordinatorAssignments?: { coordinator: { user: { fullName: string } } }[] }
+
+const today = () => {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
+
+const trackFor = (role: string) => (['SENIOR_MECHANIC', 'MECHANIC', 'SHOP_FOREMAN', 'SHOP_EMPLOYEE'].includes(role) ? 'R_AND_M' : 'TRS');
+
+type OrganizationView = 'overview' | 'structure' | 'assignments' | 'transfers';
+
+export function OrganizationPage({ view = 'overview' }: { view?: OrganizationView }) {
+  const user = useCurrentUser();
+  const isAdmin = user.systemRoles.includes('ADMIN');
+  const [assignmentTab, setAssignmentTab] = useState<'assignment' | 'transfer'>(view === 'transfers' ? 'transfer' : 'assignment');
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
+  const [selectedBaseId, setSelectedBaseId] = useState('');
+  const [selectedRole, setSelectedRole] = useState('EMPLOYEE');
+  const [selectedPositionId, setSelectedPositionId] = useState('');
+  const [selectedSupervisorId, setSelectedSupervisorId] = useState('');
+  const [startsAt, setStartsAt] = useState(today());
+  const [reason, setReason] = useState('');
+  const [mineName, setMineName] = useState('');
+  const [mineCode, setMineCode] = useState('');
+  const [wellMineId, setWellMineId] = useState('');
+  const [wellName, setWellName] = useState('');
+  const [wellCode, setWellCode] = useState('');
+  const [wellClusterNumber, setWellClusterNumber] = useState('');
+  const [coordinatorByMine, setCoordinatorByMine] = useState<Record<number, string>>({});
+  const [transferDateByMine, setTransferDateByMine] = useState<Record<number, string>>({});
+  const [errorMessageText, setErrorMessageText] = useState('');
+
+  const basesQuery = useQuery('org:bases', () => api.get<Base[]>('/org/bases'));
+  const employeesQuery = useQuery('org:employees', () => api.get<Employee[]>('/org/employees'));
+  const positionsQuery = useQuery('org:positions', () => api.get<Position[]>('/org/positions'));
+  const rolesQuery = useQuery('org:roles', () => api.get<SystemRole[]>(isAdmin ? '/admin/org/roles' : '/org/roles'));
+  const bases = basesQuery.data ?? [];
+  const employees = employeesQuery.data ?? [];
+  const positions = positionsQuery.data ?? [];
+  const roles = (rolesQuery.data ?? []).filter((role) => role.isActive);
+  const signedInEmployee = employees.find((employee) => employee.user.id === user.id);
+  const signedInRoleCodes = signedInEmployee?.user.systemRoles.map((grant) => grant.systemRole.code) ?? [];
+  const isManager = signedInRoleCodes.includes('MANAGER');
+  const isTransfer = view === 'transfers' || assignmentTab === 'transfer';
+  const selectedEmployee = employees.find((employee) => String(employee.id) === selectedEmployeeId);
+  const currentAssignment = selectedEmployee?.assignments[0];
+  const roleForForm: string = positions.find((position) => String(position.id) === selectedPositionId)?.systemRole.code ?? 'EMPLOYEE';
+  const destinationBaseId = isTransfer ? selectedBaseId : currentAssignment?.baseId ? String(currentAssignment.baseId) : '';
+  const supervisorRole = roleForForm === 'COORDINATOR' ? 'MANAGER' : roleForForm === 'EMPLOYEE' ? 'COORDINATOR' : '';
+  const supervisors = employees.filter((employee) => employee.user.systemRoles.some((grant) => grant.systemRole.code === supervisorRole) && employee.assignments[0]?.track === trackFor(roleForForm) && employee.assignments[0]?.baseId === (destinationBaseId ? Number(destinationBaseId) : null));
+  const transferCoordinators = employees.filter((employee) => employee.user.systemRoles.some((grant) => grant.systemRole.code === 'COORDINATOR') && employee.assignments[0]?.track === 'TRS' && employee.assignments[0]?.baseId === Number(selectedBaseId));
+  const minesQuery = useQuery('org:mines', () => api.get<Mine[]>('/org/mines'));
+  const mines = minesQuery.data ?? [];
+  const coordinators = employees.filter((employee) => employee.user.systemRoles.some((grant) => grant.systemRole.code === 'COORDINATOR'));
+  const coordinatorsForMine = (mine: Mine) => coordinators.filter((employee) => employee.assignments[0]?.track === 'TRS' && employee.assignments[0]?.baseId === mine.baseId);
+  const showStructure = view === 'overview' || view === 'structure';
+  const showAssignmentForm = view === 'overview' || view === 'assignments' || view === 'transfers';
+
+
+  const refresh = () => {
+    invalidate('org:');
+    invalidate('admin:');
+  };
+
+  const createMine = useAction((baseId: number) => api.post(`/org/bases/${baseId}/mines`, { name: mineName, code: mineCode || null }), {
+    onSuccess: () => {
+      setMineName('');
+      setMineCode('');
+      refresh();
+    },
+  });
+  const createWell = useAction((mineId: number) => api.post(`/org/mines/${mineId}/wells`, {
+    name: wellName,
+    code: wellCode || null,
+    clusterNumber: wellClusterNumber || null,
+  }), {
+    onSuccess: () => {
+      setWellName('');
+      setWellCode('');
+      setWellClusterNumber('');
+      refresh();
+    },
+  });
+  const assignMineCoordinator = useAction((input: { mineId: number; coordinatorEmployeeId: number; startsAt: string }) =>
+    api.post(`/org/mines/${input.mineId}/coordinator`, {
+      coordinatorEmployeeId: input.coordinatorEmployeeId,
+      startsAt: input.startsAt,
+    }), {
+      onSuccess: refresh,
+    });
+  const assignEmployee = useAction(async () => {
+    if (!selectedEmployee) throw new Error("\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0441\u043e\u0442\u0440\u0443\u0434\u043d\u0438\u043a\u0430");
+    if (isTransfer && isAdmin && !selectedBaseId) throw new Error("\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0431\u0430\u0437\u0443 \u043d\u0430\u0437\u043d\u0430\u0447\u0435\u043d\u0438\u044f");
+    if (isTransfer && !transferCoordinators.some((employee) => String(employee.id) === selectedSupervisorId)) throw new Error("\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043a\u043e\u043e\u0440\u0434\u0438\u043d\u0430\u0442\u043e\u0440\u0430 \u043f\u0440\u0438\u043d\u0438\u043c\u0430\u044e\u0449\u0435\u0439 \u0431\u0430\u0437\u044b");
+    const destinationId = isTransfer || currentAssignment?.track === 'UNASSIGNED' ? (destinationBaseId ? Number(destinationBaseId) : null) : undefined;
+    return api.post(`/org/employees/${selectedEmployee.id}/assignments`, {
+      track: trackFor(roleForForm),
+      ...(destinationId !== undefined && { baseId: destinationId }),
+      positionId: selectedPositionId ? Number(selectedPositionId) : null,
+      supervisorEmployeeId: selectedSupervisorId ? Number(selectedSupervisorId) : null,
+      startsAt,
+      reason: reason || null,
+    });
+  }, {
+    onSuccess: () => {
+      setReason('');
+      setErrorMessageText('');
+      refresh();
+    },
+    onError: (error) => setErrorMessageText(errorMessage(error)),
+  });
+
+  const mineByBase = useMemo(() => {
+    const grouped = new Map<number, Mine[]>();
+    for (const mine of mines) grouped.set(mine.baseId, [...(grouped.get(mine.baseId) ?? []), mine]);
+    return grouped;
+  }, [mines]);
+
+  return (
+    <>
+      <PageHeader
+        title={view === 'assignments' || view === 'transfers' ? 'Назначения и переводы' : isAdmin ? 'Организационная структура' : 'Моя база и команда'}
+        subtitle={view === 'assignments' || view === 'transfers'
+          ? 'Назначайте сотрудников и оформляйте переводы с сохранением истории'
+          : 'Базы и месторождения с назначениями и историей переводов'}
+      />
+      {(basesQuery.error || employeesQuery.error || positionsQuery.error || rolesQuery.error || minesQuery.error) && (
+        <Alert>{basesQuery.error ?? employeesQuery.error ?? positionsQuery.error ?? rolesQuery.error ?? minesQuery.error}</Alert>
+      )}
+      {errorMessageText && <Alert>{errorMessageText}</Alert>}
+
+      {showStructure && isAdmin && (
+        <section className="panel" style={{ padding: 18, marginBottom: 16 }}>
+          <h2 className="section-title">Базы из справочника</h2>
+          <div className="row wrap">
+            {bases.map((base) => <span className="chip" key={base.id}>{base.name} · {base.code}</span>)}
+          </div>
+        </section>
+      )}
+
+      {view === 'overview' && (
+        <section className="panel" style={{ padding: 18, marginBottom: 16 }}>
+          <h2 className="section-title">{isAdmin ? 'Карточки сотрудников и назначения' : 'Сотрудники моей зоны ответственности'}</h2>
+          {isAdmin && (
+            <p className="muted">`root` назначается менеджеру базы, `editor` — координатору. Назначение сотрудника не меняет его старые кадровые записи.</p>
+          )}
+          <div className="table-wrap">
+            <table className="table">
+              <thead><tr><th>Сотрудник</th><th>Системная роль</th><th>Должность</th><th>База / руководитель</th><th>Подразделение</th><th>Месторождения координатора</th></tr></thead>
+              <tbody>
+                {employees.map((employee) => {
+                  const assignment = employee.assignments[0];
+                  return (
+                    <tr key={employee.id} className={employee.user.isActive ? '' : 'dimmed'}>
+                      <td>{employee.user.fullName}<div className="muted small">{employee.user.login}</div></td>
+                      <td>{employee.user.systemRoles.map((grant) => grant.systemRole.name).join(', ') || 'Сотрудник'}</td>
+                      <td>{assignment?.position?.name ?? 'Не назначена'}</td>
+                      <td>{assignment?.base?.name ?? 'Не назначена'}{assignment?.supervisor?.user.fullName && <div className="muted small">Руководитель: {assignment.supervisor.user.fullName}</div>}</td>
+                      <td>{assignment?.track === 'UNASSIGNED' ? 'Не назначено' : assignment?.track === 'R_AND_M' ? 'R&M' : 'TRS'}</td>
+                      <td>{employee.mineAssignments?.map((item) => item.mine.name).join(', ') || '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {employees.length === 0 && <div className="empty">Нет сотрудников в доступной области.</div>}
+          </div>
+        </section>
+      )}
+
+      {showAssignmentForm && (isAdmin || isManager) && (
+          <form className="panel" style={{ padding: 16, marginTop: 18 }} onSubmit={async (event) => {
+            event.preventDefault();
+            setErrorMessageText('');
+            await assignEmployee.run();
+          }}>
+            <h3 className="section-title">
+                {isTransfer ? 'Оформить перевод сотрудника' : isAdmin ? 'Назначить сотрудника' : 'Перевести сотрудника внутри своей базы'}
+            </h3>
+              {view === 'assignments' && (
+                <div className="tabs" role="tablist" aria-label="Действие с назначением">
+                  <button type="button" role="tab" aria-selected={!isTransfer} className={`tab${!isTransfer ? ' active' : ''}`} onClick={() => setAssignmentTab('assignment')}>Назначение</button>
+                  <button type="button" role="tab" aria-selected={isTransfer} className={`tab${isTransfer ? ' active' : ''}`} onClick={() => setAssignmentTab('transfer')}>Перевод</button>
+                </div>
+              )}
+              {isTransfer && <p className="muted">Укажите новые условия назначения. Текущее назначение будет закрыто и сохранено в истории.</p>}
+            <div className="row wrap">
+              <SelectField label={isTransfer ? 'Сотрудник для перевода' : 'Сотрудник'} value={selectedEmployeeId} onChange={(event) => {
+                setSelectedEmployeeId(event.target.value);
+                const employee = employees.find((item) => String(item.id) === event.target.value);
+                const assignment = employee?.assignments[0];
+                setSelectedBaseId(assignment?.baseId ? String(assignment.baseId) : '');
+                setSelectedPositionId(assignment?.positionId ? String(assignment.positionId) : '');
+                setSelectedSupervisorId(assignment?.supervisorEmployeeId ? String(assignment.supervisorEmployeeId) : '');
+                if (isAdmin) setSelectedRole(employee?.user.systemRoles[0]?.systemRole.code ?? 'EMPLOYEE');
+              }}>
+                <option value="">Выберите сотрудника</option>
+                {employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.user.fullName} · {employee.user.login}</option>)}
+              </SelectField>
+              {isAdmin && isTransfer && <SelectField label="Base *" value={selectedBaseId} onChange={(event) => { setSelectedBaseId(event.target.value); setSelectedSupervisorId(''); }}>
+                <option value="">Выберите базу назначения</option>
+                {bases.map((base) => <option key={base.id} value={base.id}>{base.name}</option>)}
+              </SelectField>}
+              {selectedEmployee && !isTransfer && <span className="muted">Current base: {currentAssignment?.base?.name ?? 'not set'}</span>}
+              <SelectField label="Должность" value={selectedPositionId} onChange={(event) => setSelectedPositionId(event.target.value)}>
+                <option value="">Не указана</option>
+                {positions.map((position) => <option key={position.id} value={position.id}>{position.name}</option>)}
+              </SelectField>
+              {!isTransfer && supervisorRole && <SelectField label={"\u041d\u0435\u043f\u043e\u0441\u0440\u0435\u0434\u0441\u0442\u0432\u0435\u043d\u043d\u044b\u0439 \u0440\u0443\u043a\u043e\u0432\u043e\u0434\u0438\u0442\u0435\u043b\u044c"} value={selectedSupervisorId} onChange={(event) => setSelectedSupervisorId(event.target.value)}>
+                <option value="">{"\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0440\u0443\u043a\u043e\u0432\u043e\u0434\u0438\u0442\u0435\u043b\u044f"}</option>
+                {supervisors.map((employee) => <option key={employee.id} value={employee.id}>{employee.user.fullName}</option>)}
+              </SelectField>}
+              {isTransfer && <SelectField label={"\u041a\u043e\u043e\u0440\u0434\u0438\u043d\u0430\u0442\u043e\u0440 \u043f\u0440\u0438\u043d\u0438\u043c\u0430\u044e\u0449\u0435\u0439 \u0431\u0430\u0437\u044b *"} value={selectedSupervisorId} disabled={!selectedBaseId} onChange={(event) => setSelectedSupervisorId(event.target.value)}>
+                <option value="">{"\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043a\u043e\u043e\u0440\u0434\u0438\u043d\u0430\u0442\u043e\u0440\u0430 \u0431\u0430\u0437\u044b"}</option>
+                {transferCoordinators.map((employee) => <option key={employee.id} value={employee.id}>{employee.user.fullName}</option>)}
+              </SelectField>}
+              <TextField label="Дата начала" type="date" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} />
+              <TextField label={isTransfer ? 'Причина перевода' : 'Причина назначения или перевода'} value={reason} onChange={(event) => setReason(event.target.value)} />
+              <button
+                className="btn btn-primary"
+                disabled={
+                  assignEmployee.pending ||
+                  !selectedEmployeeId ||
+                  !startsAt ||
+                  (!destinationBaseId) ||
+                  (!!supervisorRole && !isTransfer && !selectedSupervisorId) ||
+                  (isTransfer && !selectedSupervisorId)
+                }
+              >
+                <Icon name="doneAll" small /> {isTransfer ? 'Оформить перевод' : 'Сохранить назначение'}
+              </button>
+            </div>
+            <ActionError error={assignEmployee.error} />
+          </form>
+      )}
+
+      {showStructure && <section className="panel" style={{ padding: 18 }}>
+        <h2 className="section-title">Месторождения</h2>
+        {isAdmin && <p className="muted">Сначала добавьте базу в «Справочники → Базы». Затем выберите её здесь и создайте для неё месторождение; скважины добавляются ниже в карточке месторождения.</p>}
+        {Array.from(mineByBase.entries()).map(([baseId, baseMines]) => {
+          const base = bases.find((item) => item.id === baseId);
+          return <div key={baseId} style={{ marginBottom: 20 }}>
+            <h3>{base?.name ?? baseMines[0]?.base.name}</h3>
+            {baseMines.map((mine) => <MineRow
+              key={mine.id}
+              mine={mine}
+              canManage={isAdmin || isManager}
+              coordinators={coordinatorsForMine(mine)}
+              selectedCoordinatorId={coordinatorByMine[mine.id] ?? ''}
+              startsAt={transferDateByMine[mine.id] ?? today()}
+              onCoordinatorChange={(value) => setCoordinatorByMine((state) => ({ ...state, [mine.id]: value }))}
+              onDateChange={(value) => setTransferDateByMine((state) => ({ ...state, [mine.id]: value }))}
+              onAssign={async () => {
+                await assignMineCoordinator.run({
+                  mineId: mine.id,
+                  coordinatorEmployeeId: Number(coordinatorByMine[mine.id]),
+                  startsAt: transferDateByMine[mine.id] ?? today(),
+                });
+              }}
+              pending={assignMineCoordinator.pending}
+              currentCoordinator={mine.coordinatorAssignments?.[0]?.coordinator.user.fullName ?? null}
+            />)}
+          </div>;
+        })}
+        {mines.length === 0 && <div className="empty">Месторождения пока не созданы или не назначены вашей роли.</div>}
+        {(isAdmin || isManager) && (
+          <form className="row wrap" style={{ alignItems: 'flex-end', marginTop: 18 }} onSubmit={(event) => {
+            event.preventDefault();
+            const baseId = isAdmin ? Number(selectedBaseId) : signedInEmployee?.assignments[0]?.baseId;
+            if (baseId) createMine.run(baseId);
+          }}>
+            {isAdmin && <SelectField label="База" value={selectedBaseId} onChange={(event) => setSelectedBaseId(event.target.value)}>
+              <option value="">Выберите базу</option>
+              {bases.map((base) => <option key={base.id} value={base.id}>{base.name}</option>)}
+            </SelectField>}
+            <TextField label="Новое месторождение" value={mineName} onChange={(event) => setMineName(event.target.value)} />
+            <TextField label="Код" value={mineCode} onChange={(event) => setMineCode(event.target.value)} />
+            <button className="btn btn-primary" disabled={createMine.pending || !mineName.trim() || (isAdmin && !selectedBaseId)}><Icon name="add" small /> Добавить</button>
+          </form>
+        )}
+        <ActionError error={createMine.error} />
+        {(isAdmin || isManager) && <form className="row wrap" style={{ alignItems: 'flex-end', marginTop: 18 }} onSubmit={(event) => {
+          event.preventDefault();
+          if (wellMineId) createWell.run(Number(wellMineId));
+        }}>
+          <SelectField label="Месторождение" value={wellMineId} onChange={(event) => setWellMineId(event.target.value)}>
+            <option value="">Выберите месторождение</option>
+            {mines.map((mine) => <option key={mine.id} value={mine.id}>{mine.base.name} · {mine.name}</option>)}
+          </SelectField>
+          <TextField label="Новая скважина" value={wellName} onChange={(event) => setWellName(event.target.value)} />
+          <TextField label="Код" value={wellCode} onChange={(event) => setWellCode(event.target.value)} />
+          <TextField label="Номер куста" value={wellClusterNumber} onChange={(event) => setWellClusterNumber(event.target.value)} />
+          <button className="btn btn-primary" disabled={createWell.pending || !wellMineId || !wellName.trim()}><Icon name="add" small /> Добавить скважину</button>
+        </form>}
+        <ActionError error={createWell.error} />
+      </section>}
+    </>
+  );
+}
+
+function MineRow({
+  mine,
+  canManage,
+  coordinators,
+  selectedCoordinatorId,
+  startsAt,
+  onCoordinatorChange,
+  onDateChange,
+  onAssign,
+  pending,
+  currentCoordinator,
+}: {
+  mine: Mine;
+  canManage: boolean;
+  coordinators: Employee[];
+  selectedCoordinatorId: string;
+  startsAt: string;
+  onCoordinatorChange: (value: string) => void;
+  onDateChange: (value: string) => void;
+  onAssign: () => void;
+  pending: boolean;
+  currentCoordinator: string | null;
+}) {
+  const wellsQuery = useQuery(`org:wells:${mine.id}`, () => api.get<{ id: number; name: string; code: string | null }[]>(`/org/mines/${mine.id}/wells`));
+  return <div className="row wrap" style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+    <strong>{mine.name}</strong><span className="muted">{mine.code ?? ''}</span>
+    <span>Координатор: {currentCoordinator ?? 'не назначен'}</span>
+    <span>{wellsQuery.data?.length ?? 0} скважин</span>
+    {wellsQuery.error && <span className="danger">{wellsQuery.error}</span>}
+    {canManage && <SelectField label="Координатор проекта" value={selectedCoordinatorId} onChange={(event) => onCoordinatorChange(event.target.value)}>
+      <option value="">Выберите координатора</option>
+      {coordinators.map((coordinator) => <option key={coordinator.id} value={coordinator.id}>{coordinator.user.fullName}</option>)}
+    </SelectField>}
+    {canManage && <TextField label="Дата назначения" type="date" value={startsAt} onChange={(event) => onDateChange(event.target.value)} />}
+    {canManage && <button type="button" className="btn" disabled={pending || !coordinators.some((coordinator) => String(coordinator.id) === selectedCoordinatorId)} onClick={onAssign}>Назначить координатора</button>}
+  </div>;
+}
