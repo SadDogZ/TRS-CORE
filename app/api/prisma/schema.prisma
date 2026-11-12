@@ -44,6 +44,7 @@ model User {
   createdBases                      Base[]                      @relation("BaseCreator")
   createdMines                      Mine[]                      @relation("MineCreator")
   createdMineCoordinatorAssignments MineCoordinatorAssignment[] @relation("MineCoordinatorAssignmentCreator")
+  createdWellPads                   WellPad[]                   @relation("WellPadCreator")
   createdWells                      Well[]                      @relation("WellCreator")
   createdContracts                  Contract[]                  @relation("ContractCreator")
   createdContractDocuments          ContractDocument[]          @relation("ContractDocumentCreator")
@@ -51,6 +52,7 @@ model User {
   createdWork                       WorkExecution[]             @relation("WorkCreator")
   createdCustomerSiteWorks          CustomerSiteWork[]          @relation("CustomerSiteWorkCreator")
   createdPlannedWorks               PlannedWork[]                @relation("PlannedWorkCreator")
+  createdCustomerObjectCoordinatorAssignments CustomerObjectCoordinatorAssignment[] @relation("CustomerObjectCoordinatorAssignmentCreator")
 
   @@index([positionId], map: "User_positionId_fkey")
 }
@@ -82,6 +84,7 @@ model Employee {
   user                        User                        @relation(fields: [userId], references: [id], onDelete: Restrict)
   assignments                 EmployeeAssignment[]        @relation("AssignmentEmployee")
   supervised                  EmployeeAssignment[]        @relation("AssignmentSupervisor")
+  managed                     EmployeeAssignment[]        @relation("AssignmentManager")
   mineAssignments             MineCoordinatorAssignment[]
   responsibleFor              WorkExecutionResponsible[]
   changes                     OrganizationChange[]
@@ -89,6 +92,7 @@ model Employee {
   coordinatedPlannedWorks     PlannedWork[]               @relation("PlannedWorkCoordinator")
   supervisedPlannedWorks      PlannedWork[]               @relation("PlannedWorkSupervisor")
   assignedPlannedWorks        PlannedWorkEmployee[]
+  customerObjectAssignments   CustomerObjectCoordinatorAssignment[]
 
   @@index([userId])
 }
@@ -106,6 +110,8 @@ model Base {
   mines           Mine[]
   contracts       Contract[]
   plannedWorks    PlannedWork[]
+  customers       Customer[]
+  customerObjects CustomerObject[]
 
   @@index([isActive, name])
 }
@@ -167,6 +173,7 @@ model EmployeeAssignment {
   positionId           Int?
   baseId               Int?
   supervisorEmployeeId Int?
+  managerId            Int?
   statusId             Int
   track                OrganizationTrack @default(UNASSIGNED)
   startsAt             DateTime          @db.Date
@@ -180,12 +187,14 @@ model EmployeeAssignment {
   position             Position?         @relation(fields: [positionId], references: [id], onDelete: Restrict)
   base                 Base?             @relation(fields: [baseId], references: [id], onDelete: Restrict)
   supervisor           Employee?         @relation("AssignmentSupervisor", fields: [supervisorEmployeeId], references: [id], onDelete: Restrict)
+  manager              Employee?         @relation("AssignmentManager", fields: [managerId], references: [id], onDelete: SetNull)
   status               AssignmentStatus  @relation(fields: [statusId], references: [id], onDelete: Restrict)
   createdBy            User?             @relation("AssignmentCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([employeeId, startsAt, endsAt])
   @@index([baseId, track, startsAt, endsAt])
   @@index([supervisorEmployeeId, startsAt, endsAt])
+  @@index([managerId, startsAt, endsAt])
   @@index([positionId])
   @@index([statusId])
   @@index([operationId])
@@ -213,7 +222,6 @@ model Mine {
   id                     Int                         @id @default(autoincrement())
   baseId                 Int
   name                   String                      @db.VarChar(150)
-  code                   String?                     @db.VarChar(50)
   isActive               Boolean                     @default(true)
   createdById            Int?
   createdAt              DateTime                    @default(now())
@@ -221,12 +229,12 @@ model Mine {
   base                   Base                        @relation(fields: [baseId], references: [id], onDelete: Restrict)
   createdBy              User?                       @relation("MineCreator", fields: [createdById], references: [id], onDelete: SetNull)
   coordinatorAssignments MineCoordinatorAssignment[]
+  pads                   WellPad[]
   wells                  Well[]
   customerSiteWorks      CustomerSiteWork[]
   plannedWorks           PlannedWork[]
 
   @@unique([baseId, name])
-  @@unique([baseId, code])
   @@index([baseId, isActive])
 }
 
@@ -249,9 +257,46 @@ model MineCoordinatorAssignment {
   @@index([operationId])
 }
 
+model CustomerObjectCoordinatorAssignment {
+  id                      Int      @id @default(autoincrement())
+  customerObjectId        Int
+  coordinatorId           Int
+  startsAt                DateTime @db.Date
+  endsAt                  DateTime? @db.Date
+  comment                 String?  @db.Text
+  operationId             String   @db.VarChar(36)
+  currentCustomerObjectId Int?     @unique(map: "cust_obj_coord_cur_obj_uq")
+  createdById             Int?
+  createdAt               DateTime @default(now())
+  customerObject          CustomerObject @relation(fields: [customerObjectId], references: [id], onDelete: Restrict, map: "cust_obj_coord_obj_fk")
+  coordinator             Employee @relation(fields: [coordinatorId], references: [id], onDelete: Restrict, map: "cust_obj_coord_emp_fk")
+  createdBy               User?    @relation("CustomerObjectCoordinatorAssignmentCreator", fields: [createdById], references: [id], onDelete: SetNull, map: "cust_obj_coord_user_fk")
+
+  @@index([customerObjectId, startsAt, endsAt], map: "cust_obj_coord_obj_dates_idx")
+  @@index([coordinatorId, startsAt, endsAt], map: "cust_obj_coord_emp_dates_idx")
+  @@index([operationId], map: "cust_obj_coord_op_idx")
+}
+
+model WellPad {
+  id          Int      @id @default(autoincrement())
+  mineId      Int
+  name        String   @db.VarChar(150)
+  isActive    Boolean  @default(true)
+  createdById Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  mine        Mine     @relation(fields: [mineId], references: [id], onDelete: Restrict)
+  createdBy   User?    @relation("WellPadCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  wells       Well[]
+
+  @@unique([mineId, name])
+  @@index([mineId, isActive])
+}
+
 model Well {
   id                Int                 @id @default(autoincrement())
   mineId            Int
+  padId             Int?
   name              String              @db.VarChar(150)
   code              String?             @db.VarChar(50)
   clusterNumber     String?             @db.VarChar(50)
@@ -260,6 +305,7 @@ model Well {
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
   mine              Mine                @relation(fields: [mineId], references: [id], onDelete: Restrict)
+  pad               WellPad?            @relation(fields: [padId], references: [id], onDelete: SetNull)
   createdBy         User?               @relation("WellCreator", fields: [createdById], references: [id], onDelete: SetNull)
   contractBases     WellContractBasis[]
   executions        WorkExecution[]
@@ -269,20 +315,67 @@ model Well {
   @@unique([mineId, name])
   @@unique([mineId, code])
   @@index([mineId, isActive])
+  @@index([padId])
 }
 
 model Customer {
   id                Int                @id @default(autoincrement())
   name              String             @db.VarChar(200)
   code              String?            @unique @db.VarChar(50)
+  address           String?            @db.VarChar(300)
+  comments          String?            @db.Text
+  baseId            Int?
   isActive          Boolean            @default(true)
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
+  base              Base?              @relation(fields: [baseId], references: [id], onDelete: SetNull)
   contracts         Contract[]
   customerSiteWorks CustomerSiteWork[]
   radarCards        RadarCard[]
+  representatives   CustomerRepresentative[]
+  objects           CustomerObject[]
 
   @@index([name, isActive])
+  @@index([baseId, isActive])
+}
+
+model CustomerRepresentative {
+  id            Int      @id @default(autoincrement())
+  customerId    Int
+  fullName      String   @db.VarChar(200)
+  phone         String?  @db.VarChar(50)
+  email         String?  @db.VarChar(150)
+  relationship  String?  @db.VarChar(200)
+  comments      String?  @db.Text
+  dedupKey      String   @db.VarChar(400)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  @@unique([customerId, dedupKey])
+  @@index([customerId, fullName])
+}
+
+model CustomerObject {
+  id                     Int      @id @default(autoincrement())
+  customerId             Int
+  baseId                 Int
+  contractId             Int?
+  name                   String   @db.VarChar(200)
+  relationship           String   @db.VarChar(200)
+  comments               String?  @db.Text
+  status                 String   @default("ACTIVE") @db.VarChar(50)
+  isActive               Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  customer               Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  base                   Base     @relation(fields: [baseId], references: [id], onDelete: Restrict)
+  contract               Contract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  coordinatorAssignments CustomerObjectCoordinatorAssignment[]
+
+  @@unique([customerId, baseId, name])
+  @@index([baseId, status, isActive])
+  @@index([contractId])
 }
 
 model ContractStatus {
@@ -317,6 +410,7 @@ model Contract {
   permissions ContractWorkPermission[]
   executions  WorkExecution[]
   documents   ContractDocument[]
+  customerObjects CustomerObject[]
 
   @@unique([baseId, number])
   @@index([customerId, statusId])

@@ -19,11 +19,16 @@ import type {
   ContractInput,
   ContractUpdateInput,
   ContractPermissionInput,
+  CustomerObjectCoordinatorAssignmentInput,
+  CustomerObjectInput,
   CustomerInput,
+  CustomerRepresentativeInput,
   CustomerUpdateInput,
   EmployeeProfileInput,
   MineCoordinatorInput,
   MineInput,
+  PadInput,
+  PadUpdateInput,
   StatusCatalogInput,
   StatusCatalogUpdateInput,
   WellInput,
@@ -84,6 +89,7 @@ const WORKFLOW_STATUSES = {
     ['DRAFT', 'Черновик', false, 1],
     ['ACTIVE', 'Действует', true, 2],
     ['CLOSED', 'Закрыт', false, 3],
+    ['ARCHIVED', 'В архиве', false, 4],
   ],
   addendum: [
     ['DRAFT', 'Черновик', false, 1],
@@ -100,6 +106,30 @@ const WORKFLOW_STATUSES = {
 
 const today = () => todayInTimezone('Europe/Moscow');
 const dateOnly = (value: string) => new Date(`${value}T00:00:00.000Z`);
+const normalize = (value: string | null | undefined) => (value ?? '').trim().toLowerCase();
+const representativeDedupKey = (input: CustomerRepresentativeInput) =>
+  `${normalize(input.fullName)}|${normalize(input.phone)}|${normalize(input.email)}|${normalize(input.relationship)}`;
+
+async function customerScopeBaseIds(tx: Database, actor: User, roles: string[]) {
+  if (isAdministrator(actor, roles)) {
+    const bases = await tx.base.findMany({ where: { isActive: true }, select: { id: true } });
+    return bases.map((item) => item.id);
+  }
+  if (roles.includes('MANAGER')) {
+    const baseId = await actorBase(tx, actor);
+    return baseId ? [baseId] : [];
+  }
+  if (roles.includes('COORDINATOR')) {
+    const employee = await tx.employee.findUnique({ where: { userId: actor.id }, select: { id: true } });
+    if (!employee) return [];
+    const assignments = await tx.customerObjectCoordinatorAssignment.findMany({
+      where: { coordinatorId: employee.id, currentCustomerObjectId: { not: null } },
+      select: { customerObject: { select: { baseId: true } } },
+    });
+    return [...new Set(assignments.map((item) => item.customerObject.baseId))];
+  }
+  return [];
+}
 
 export async function initializeOrganizationCatalog() {
   await Promise.all([
@@ -199,6 +229,7 @@ export async function updateEmployeePosition(tx: Tx, user: User, positionId: num
         statusId: activeStatus.id,
         track: existing.track,
         startsAt: dateOnly(today()),
+        managerId: existing.managerId,
         activeEmployeeId: employee.id,
         reason: 'Изменение должности через совместимый API пользователей',
         operationId,
@@ -252,7 +283,7 @@ async function assertBaseAccess(tx: Database, actor: User, baseId: number, actor
   if (!roles.includes('MANAGER') || (await actorBase(tx, actor)) !== baseId) throw forbidden();
 }
 
-async function canViewEmployee(actor: User, employee: { id: number; assignments?: { baseId: number | null; supervisorEmployeeId: number | null; activeEmployeeId: number | null }[] }) {
+export async function canViewEmployee(actor: User, employee: { id: number; assignments?: { baseId: number | null; supervisorEmployeeId: number | null; activeEmployeeId: number | null }[] }) {
   const roles = await roleCodes(prisma, actor.id);
   if (isAdministrator(actor, roles)) return true;
   const actorEmployee = await prisma.employee.findUnique({ where: { userId: actor.id }, select: { id: true } });
@@ -264,6 +295,70 @@ async function canViewEmployee(actor: User, employee: { id: number; assignments?
     if (actorEmployee && active?.supervisorEmployeeId === actorEmployee.id) return true;
   }
   return false;
+}
+
+/** Проверяет, что actor вправе просматривать/редактировать карточку сотрудника employeeId, и возвращает employee с userId. */
+export async function assertManageableEmployee(actor: User, employeeId: number) {
+  const employee = await prisma.employee.findUnique({
+    where: { id: employeeId },
+    include: {
+      user: { select: { isDeleted: true } },
+      assignments: { where: { activeEmployeeId: { not: null } }, select: { baseId: true, supervisorEmployeeId: true, activeEmployeeId: true } },
+    },
+  });
+  if (!employee || employee.user.isDeleted) throw notFound('Сотрудник не найден');
+  if (!(await canViewEmployee(actor, employee))) throw forbidden();
+  return employee;
+}
+
+/** Проверяет, что actor вправе создавать персонал на указанной базе (ADMIN — везде, MANAGER — только своя база). */
+export async function assertEmployeeBaseAssignable(actor: User, baseId: number | null | undefined) {
+  const roles = await roleCodes(prisma, actor.id);
+  if (isAdministrator(actor, roles)) return;
+  if (!roles.includes('MANAGER')) throw forbidden();
+  if (!baseId || (await actorBase(prisma, actor)) !== baseId) throw forbidden();
+}
+
+/** Записывает ответственного менеджера в действующее назначение, не создавая перевод. */
+export async function setEmployeeManager(actor: User, employeeId: number, managerId: number) {
+  const roles = await roleCodes(prisma, actor.id);
+  if (!isAdministrator(actor, roles) && !roles.includes('MANAGER')) throw forbidden();
+  await assertManageableEmployee(actor, employeeId);
+  return prisma.$transaction(async (tx) => {
+    const existing = await currentAssignment(tx, employeeId);
+    if (!existing) throw conflict('У сотрудника нет действующего назначения');
+    if (!isAdministrator(actor, roles)) {
+      const scope = await actorBase(tx, actor);
+      if (!scope || existing.baseId !== scope) throw forbidden();
+    }
+    if (managerId === employeeId) throw badRequest('Сотрудник не может быть ответственным менеджером сам для себя');
+    const managerEmployee = await tx.employee.findUnique({
+      where: { id: managerId },
+      include: { user: { select: { id: true, isActive: true, isDeleted: true } } },
+    });
+    const managerAssignment = managerEmployee ? await currentAssignment(tx, managerEmployee.id) : null;
+    const managerRoles = managerEmployee ? await roleCodes(tx, managerEmployee.user.id) : [];
+    if (!managerEmployee || !managerEmployee.user.isActive || managerEmployee.user.isDeleted || !managerAssignment || !managerRoles.includes('MANAGER')) {
+      throw badRequest('Ответственный менеджер должен иметь действующую роль MANAGER');
+    }
+    if (existing.baseId !== null && managerAssignment.baseId !== existing.baseId) {
+      throw badRequest('Ответственный менеджер должен быть назначен на ту же базу');
+    }
+    if (existing.managerId === managerId) return existing;
+    const updated = await tx.employeeAssignment.update({
+      where: { id: existing.id },
+      data: { managerId },
+      include: { manager: { include: { user: { select: { fullName: true } } } } },
+    });
+    await audit(tx, {
+      actorId: actor.id,
+      action: 'organization.employee.manager',
+      entityType: 'EmployeeAssignment',
+      entityId: existing.id,
+      diff: { managerId: { from: existing.managerId, to: managerId } },
+    });
+    return updated;
+  });
 }
 
 export async function listBases(actor: User) {
@@ -306,7 +401,7 @@ export async function listEmployees(actor: User) {
       },
       assignments: {
         where: { activeEmployeeId: { not: null } },
-        include: { position: true, base: true, status: true, supervisor: { include: { user: { select: { fullName: true } } } } },
+        include: { position: true, base: true, status: true, supervisor: { include: { user: { select: { fullName: true } } } }, manager: { include: { user: { select: { fullName: true } } } } },
       },
       mineAssignments: {
         where: { currentMineId: { not: null } },
@@ -322,7 +417,7 @@ export async function listMines(actor: User, baseId?: number) {
   if (isAdministrator(actor, roles)) {
     return prisma.mine.findMany({
       where: { ...(baseId && { baseId }) },
-      include: { base: true, coordinatorAssignments: { where: { currentMineId: { not: null } }, include: { coordinator: { include: { user: { select: { fullName: true } } } } } } },
+      include: { base: true, _count: { select: { pads: true, wells: true } }, coordinatorAssignments: { where: { currentMineId: { not: null } }, include: { coordinator: { include: { user: { select: { fullName: true } } } } } } },
       orderBy: [{ baseId: 'asc' }, { name: 'asc' }],
     });
   }
@@ -330,7 +425,7 @@ export async function listMines(actor: User, baseId?: number) {
   if (roles.includes('MANAGER')) {
     const scope = await actorBase(prisma, actor);
     if (!scope || (baseId !== undefined && baseId !== scope)) throw forbidden();
-    return prisma.mine.findMany({ where: { baseId: scope }, include: { base: true, coordinatorAssignments: { where: { currentMineId: { not: null } }, include: { coordinator: { include: { user: { select: { fullName: true } } } } } } }, orderBy: { name: 'asc' } });
+    return prisma.mine.findMany({ where: { baseId: scope }, include: { base: true, _count: { select: { pads: true, wells: true } }, coordinatorAssignments: { where: { currentMineId: { not: null } }, include: { coordinator: { include: { user: { select: { fullName: true } } } } } } }, orderBy: { name: 'asc' } });
   }
   if (roles.includes('COORDINATOR') && employee) {
     return prisma.mine.findMany({
@@ -338,29 +433,33 @@ export async function listMines(actor: User, baseId?: number) {
         coordinatorAssignments: { some: { coordinatorId: employee.id, currentMineId: { not: null } } },
         ...(baseId && { baseId }),
       },
-      include: { base: true, coordinatorAssignments: { where: { currentMineId: { not: null } }, include: { coordinator: { include: { user: { select: { fullName: true } } } } } } },
+      include: { base: true, _count: { select: { pads: true, wells: true } }, coordinatorAssignments: { where: { currentMineId: { not: null } }, include: { coordinator: { include: { user: { select: { fullName: true } } } } } } },
       orderBy: { name: 'asc' },
     });
   }
   throw forbidden();
 }
 
-export async function listWells(actor: User, mineId: number) {
+async function assertMineReadable(actor: User, mineId: number) {
   const mine = await prisma.mine.findUnique({ where: { id: mineId }, include: { base: true } });
   if (!mine?.isActive) throw notFound('Месторождение не найдено или архивировано');
   const roles = await roleCodes(prisma, actor.id);
-  if (!isAdministrator(actor, roles)) {
-    const employee = await prisma.employee.findUnique({ where: { userId: actor.id } });
-    const current = employee ? await currentAssignment(prisma, employee.id) : null;
-    const manager = roles.includes('MANAGER') && current?.baseId === mine.baseId;
-    const coordinator =
-      roles.includes('COORDINATOR') &&
-      !!employee &&
-      !!(await prisma.mineCoordinatorAssignment.findFirst({
-        where: { mineId, coordinatorId: employee.id, currentMineId: mineId },
-      }));
-    if (!manager && !coordinator) throw forbidden();
-  }
+  if (isAdministrator(actor, roles)) return mine;
+  const employee = await prisma.employee.findUnique({ where: { userId: actor.id } });
+  const current = employee ? await currentAssignment(prisma, employee.id) : null;
+  const manager = roles.includes('MANAGER') && current?.baseId === mine.baseId;
+  const coordinator =
+    roles.includes('COORDINATOR') &&
+    !!employee &&
+    !!(await prisma.mineCoordinatorAssignment.findFirst({
+      where: { mineId, coordinatorId: employee.id, currentMineId: mineId },
+    }));
+  if (!manager && !coordinator) throw forbidden();
+  return mine;
+}
+
+export async function listWells(actor: User, mineId: number) {
+  await assertMineReadable(actor, mineId);
   return prisma.well.findMany({
     where: { mineId },
     include: { contractBases: { where: { currentWellId: { not: null } }, include: { contract: true, addendum: true } } },
@@ -389,19 +488,143 @@ export async function listCustomerSiteWorksForWell(actor: User, wellId: number) 
   }));
 }
 
-export async function listContracts(actor: User, baseId: number) {
+export async function listContracts(actor: User, baseId: number, includeArchived = false) {
   await assertBaseAccess(prisma, actor, baseId);
   return prisma.contract.findMany({
-    where: { baseId },
+    where: { baseId, ...(includeArchived ? {} : { status: { code: { not: 'ARCHIVED' } } }) },
     include: { customer: true, base: true, status: true, addenda: { include: { status: true } } },
     orderBy: [{ startsAt: 'desc' }, { number: 'asc' }],
   });
 }
 
+/** Архивирует договор: переводит его в статус ARCHIVED, не удаляя записи. Предупреждает о незавершённых работах, но не блокирует операцию. */
+export async function archiveContract(actor: User, contractId: number) {
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.contract.findUnique({ where: { id: contractId }, include: { status: true } });
+    if (!existing) throw notFound('Договор не найден');
+    await assertBaseAccess(tx, actor, existing.baseId);
+    if (existing.status.code === 'ARCHIVED') return existing;
+    const archivedStatus = await tx.contractStatus.findUnique({ where: { code: 'ARCHIVED' } });
+    if (!archivedStatus) throw conflict('Статус ARCHIVED не настроен в справочнике статусов договора');
+    const openWork = await tx.workExecution.count({ where: { contractId, status: { code: { in: ['PLANNED', 'IN_PROGRESS'] } } } });
+    const updated = await tx.contract.update({ where: { id: contractId }, data: { statusId: archivedStatus.id }, include: { customer: true, base: true, status: true } });
+    await audit(tx, {
+      actorId: actor.id,
+      action: 'organization.contract.archive',
+      entityType: 'Contract',
+      entityId: contractId,
+      diff: { status: { from: existing.status.code, to: 'ARCHIVED' } },
+    });
+    return { ...updated, hadOpenWork: openWork > 0 };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
 export async function listCustomers(actor: User) {
   const roles = await roleCodes(prisma, actor.id);
-  if (!isAdministrator(actor, roles) && !roles.includes('MANAGER')) throw forbidden();
-  return prisma.customer.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } });
+  const baseIds = await customerScopeBaseIds(prisma, actor, roles);
+  if (!baseIds.length && !isAdministrator(actor, roles)) throw forbidden();
+  return prisma.customer.findMany({
+    where: {
+      isActive: true,
+      ...(isAdministrator(actor, roles)
+        ? {}
+        : {
+            OR: [
+              { baseId: { in: baseIds } },
+              { contracts: { some: { baseId: { in: baseIds } } } },
+              { objects: { some: { baseId: { in: baseIds }, isActive: true } } },
+            ],
+          }),
+    },
+    orderBy: { name: 'asc' },
+  });
+}
+
+export async function listCustomerDirectory(actor: User, search?: string) {
+  const roles = await roleCodes(prisma, actor.id);
+  const baseIds = await customerScopeBaseIds(prisma, actor, roles);
+  if (!baseIds.length && !isAdministrator(actor, roles)) throw forbidden();
+  const term = search?.trim();
+  const items = await prisma.customer.findMany({
+    where: {
+      ...(term
+        ? {
+            OR: [
+              { name: { contains: term } },
+              { code: { contains: term } },
+              { address: { contains: term } },
+            ],
+          }
+        : {}),
+      ...(isAdministrator(actor, roles)
+        ? {}
+        : {
+            OR: [
+              { baseId: { in: baseIds } },
+              { contracts: { some: { baseId: { in: baseIds } } } },
+              { objects: { some: { baseId: { in: baseIds } } } },
+            ],
+          }),
+    },
+    include: {
+      contracts: {
+        where: isAdministrator(actor, roles) ? {} : { baseId: { in: baseIds } },
+        select: { id: true },
+      },
+      objects: {
+        where: isAdministrator(actor, roles) ? {} : { baseId: { in: baseIds } },
+        select: { id: true },
+      },
+    },
+    orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+  });
+  return items.map((item) => ({
+    id: item.id,
+    name: item.name,
+    code: item.code,
+    address: item.address,
+    comments: item.comments,
+    status: item.isActive ? 'ACTIVE' : 'INACTIVE',
+    objectsCount: item.objects.length,
+    contractsCount: item.contracts.length,
+  }));
+}
+
+export async function getCustomerDetails(actor: User, customerId: number) {
+  const roles = await roleCodes(prisma, actor.id);
+  const baseIds = await customerScopeBaseIds(prisma, actor, roles);
+  if (!baseIds.length && !isAdministrator(actor, roles)) throw forbidden();
+  const customer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    include: {
+      representatives: { orderBy: [{ fullName: 'asc' }, { id: 'asc' }] },
+      contracts: {
+        where: isAdministrator(actor, roles) ? {} : { baseId: { in: baseIds } },
+        include: { status: true, base: { select: { id: true, name: true } } },
+        orderBy: [{ startsAt: 'desc' }, { number: 'asc' }],
+      },
+      objects: {
+        where: isAdministrator(actor, roles) ? {} : { baseId: { in: baseIds } },
+        include: {
+          base: { select: { id: true, name: true } },
+          contract: { select: { id: true, number: true } },
+          coordinatorAssignments: {
+            where: { currentCustomerObjectId: { not: null } },
+            include: { coordinator: { include: { user: { select: { fullName: true } } } } },
+          },
+        },
+        orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+      },
+    },
+  });
+  if (!customer) throw notFound('Заказчик не найден');
+  if (!isAdministrator(actor, roles)) {
+    const visible = customer.baseId && baseIds.includes(customer.baseId)
+      || customer.contracts.length > 0
+      || customer.objects.length > 0;
+    if (!visible) throw forbidden();
+  }
+  return customer;
 }
 
 export async function listAdminCustomers() {
@@ -410,14 +633,263 @@ export async function listAdminCustomers() {
 
 export async function updateCustomer(actor: User, customerId: number, input: CustomerUpdateInput) {
   const roles = await roleCodes(prisma, actor.id);
-  if (!isAdministrator(actor, roles)) throw forbidden();
+  if (!isAdministrator(actor, roles) && !roles.includes('MANAGER')) throw forbidden();
   return prisma.$transaction(async (tx) => {
     const existing = await tx.customer.findUnique({ where: { id: customerId } });
     if (!existing) throw notFound('Заказчик не найден');
+    if (!isAdministrator(actor, roles)) {
+      const scopeBase = await actorBase(tx, actor);
+      const inScope = scopeBase !== null && (
+        existing.baseId === scopeBase
+        || await tx.contract.count({ where: { customerId, baseId: scopeBase } }) > 0
+        || await tx.customerObject.count({ where: { customerId, baseId: scopeBase } }) > 0
+      );
+      if (!inScope) throw forbidden();
+    }
     const updated = await tx.customer.update({ where: { id: customerId }, data: input });
-    await audit(tx, { actorId: actor.id, action: 'organization.customer.update', entityType: 'Customer', entityId: customerId, diff: diffOf(existing, updated, ['name', 'code', 'isActive']) });
+    await audit(tx, {
+      actorId: actor.id,
+      action: 'organization.customer.update',
+      entityType: 'Customer',
+      entityId: customerId,
+      diff: diffOf(existing, updated, ['name', 'code', 'address', 'comments', 'isActive']),
+    });
     return updated;
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+export async function createCustomerRepresentative(actor: User, customerId: number, input: CustomerRepresentativeInput) {
+  const roles = await roleCodes(prisma, actor.id);
+  if (!isAdministrator(actor, roles) && !roles.includes('MANAGER')) throw forbidden();
+  const dedupKey = representativeDedupKey(input);
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const customer = await tx.customer.findUnique({ where: { id: customerId }, select: { id: true, baseId: true } });
+      if (!customer) throw notFound('Заказчик не найден');
+      if (!isAdministrator(actor, roles)) {
+        const scopeBase = await actorBase(tx, actor);
+        if (!scopeBase || (customer.baseId !== null && customer.baseId !== scopeBase)) throw forbidden();
+      }
+      const representative = await tx.customerRepresentative.upsert({
+        where: { customerId_dedupKey: { customerId, dedupKey } },
+        update: {
+          fullName: input.fullName,
+          phone: input.phone ?? null,
+          email: input.email ?? null,
+          relationship: input.relationship ?? null,
+          comments: input.comments ?? null,
+        },
+        create: {
+          customerId,
+          fullName: input.fullName,
+          phone: input.phone ?? null,
+          email: input.email ?? null,
+          relationship: input.relationship ?? null,
+          comments: input.comments ?? null,
+          dedupKey,
+        },
+      });
+      await audit(tx, {
+        actorId: actor.id,
+        action: 'organization.customer.representative.upsert',
+        entityType: 'CustomerRepresentative',
+        entityId: representative.id,
+      });
+      return representative;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2002', 'P2034'].includes(error.code)) {
+      throw conflict('Представитель уже создан параллельно; обновите список');
+    }
+    throw error;
+  }
+}
+
+export async function updateCustomerRepresentative(actor: User, customerId: number, representativeId: number, input: CustomerRepresentativeInput) {
+  const roles = await roleCodes(prisma, actor.id);
+  if (!isAdministrator(actor, roles) && !roles.includes('MANAGER')) throw forbidden();
+  const dedupKey = representativeDedupKey(input);
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.customerRepresentative.findFirst({ where: { id: representativeId, customerId } });
+    if (!existing) throw notFound('Представитель заказчика не найден');
+    if (!isAdministrator(actor, roles)) {
+      const scopeBase = await actorBase(tx, actor);
+      const customer = await tx.customer.findUnique({ where: { id: customerId }, select: { baseId: true } });
+      if (!scopeBase || (customer?.baseId !== null && customer?.baseId !== scopeBase)) throw forbidden();
+    }
+    const updated = await tx.customerRepresentative.update({
+      where: { id: representativeId },
+      data: {
+        fullName: input.fullName,
+        phone: input.phone ?? null,
+        email: input.email ?? null,
+        relationship: input.relationship ?? null,
+        comments: input.comments ?? null,
+        dedupKey,
+      },
+    });
+    await audit(tx, {
+      actorId: actor.id,
+      action: 'organization.customer.representative.update',
+      entityType: 'CustomerRepresentative',
+      entityId: representativeId,
+      diff: diffOf(existing, updated, ['fullName', 'phone', 'email', 'relationship', 'comments']),
+    });
+    return updated;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+export async function createCustomerObject(actor: User, customerId: number, input: CustomerObjectInput) {
+  const roles = await roleCodes(prisma, actor.id);
+  if (!isAdministrator(actor, roles) && !roles.includes('MANAGER')) throw forbidden();
+  return prisma.$transaction(async (tx) => {
+    const customer = await tx.customer.findUnique({ where: { id: customerId }, select: { id: true, baseId: true } });
+    if (!customer) throw notFound('Заказчик не найден');
+    const managerBase = roles.includes('MANAGER') ? await actorBase(tx, actor) : null;
+    if (roles.includes('MANAGER') && !managerBase) throw forbidden();
+    const baseId = managerBase ?? customer.baseId;
+    if (!baseId) throw badRequest('Сначала назначьте заказчику базу через менеджера или укажите договор своей базы');
+    const contract = input.contractId
+      ? await tx.contract.findUnique({ where: { id: input.contractId }, select: { id: true, baseId: true } })
+      : null;
+    if (input.contractId && (!contract || contract.baseId !== baseId)) {
+      throw badRequest('Договор должен относиться к базе объекта заказчика');
+    }
+    const created = await tx.customerObject.create({
+      data: {
+        customerId,
+        baseId,
+        contractId: input.contractId ?? null,
+        name: input.name,
+        relationship: input.relationship,
+        comments: input.comments ?? null,
+        status: input.status,
+        isActive: input.isActive ?? true,
+      },
+      include: { base: { select: { id: true, name: true } }, contract: { select: { id: true, number: true } } },
+    });
+    if (customer.baseId === null) {
+      await tx.customer.update({ where: { id: customerId }, data: { baseId } });
+    }
+    await audit(tx, {
+      actorId: actor.id,
+      action: 'organization.customer.object.create',
+      entityType: 'CustomerObject',
+      entityId: created.id,
+    });
+    return created;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+export async function updateCustomerObject(actor: User, customerId: number, objectId: number, input: CustomerObjectInput) {
+  const roles = await roleCodes(prisma, actor.id);
+  if (!isAdministrator(actor, roles) && !roles.includes('MANAGER')) throw forbidden();
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.customerObject.findFirst({ where: { id: objectId, customerId } });
+    if (!existing) throw notFound('Объект заказчика не найден');
+    await assertBaseAccess(tx, actor, existing.baseId);
+    const contract = input.contractId
+      ? await tx.contract.findUnique({ where: { id: input.contractId }, select: { id: true, baseId: true } })
+      : null;
+    if (input.contractId && (!contract || contract.baseId !== existing.baseId)) {
+      throw badRequest('Договор должен относиться к базе объекта заказчика');
+    }
+    const updated = await tx.customerObject.update({
+      where: { id: objectId },
+      data: {
+        contractId: input.contractId ?? null,
+        name: input.name,
+        relationship: input.relationship,
+        comments: input.comments ?? null,
+        status: input.status,
+        isActive: input.isActive ?? true,
+      },
+      include: {
+        base: { select: { id: true, name: true } },
+        contract: { select: { id: true, number: true } },
+        coordinatorAssignments: {
+          where: { currentCustomerObjectId: { not: null } },
+          include: { coordinator: { include: { user: { select: { fullName: true } } } } },
+        },
+      },
+    });
+    await audit(tx, {
+      actorId: actor.id,
+      action: 'organization.customer.object.update',
+      entityType: 'CustomerObject',
+      entityId: objectId,
+      diff: diffOf(existing, updated, ['name', 'contractId', 'relationship', 'comments', 'status', 'isActive']),
+    });
+    return updated;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+export async function assignCustomerObjectCoordinator(actor: User, objectId: number, input: CustomerObjectCoordinatorAssignmentInput) {
+  const roles = await roleCodes(prisma, actor.id);
+  if (!isAdministrator(actor, roles) && !roles.includes('MANAGER')) throw forbidden();
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const customerObject = await tx.customerObject.findUnique({ where: { id: objectId } });
+      if (!customerObject || !customerObject.isActive) throw notFound('Объект заказчика не найден или архивирован');
+      await assertBaseAccess(tx, actor, customerObject.baseId);
+      const coordinator = await tx.employee.findUnique({
+        where: { id: input.coordinatorEmployeeId },
+        include: { user: { select: { isActive: true, isDeleted: true } } },
+      });
+      const assignment = coordinator ? await currentAssignment(tx, coordinator.id) : null;
+      if (
+        !coordinator
+        || !coordinator.user.isActive
+        || coordinator.user.isDeleted
+        || !assignment
+        || assignment.baseId !== customerObject.baseId
+        || assignment.track !== 'TRS'
+        || !(await hasSystemRole(tx, coordinator.userId, 'COORDINATOR'))
+      ) {
+        throw badRequest('Координатор должен иметь действующее назначение TRS на базу объекта заказчика');
+      }
+      if (input.startsAt > today()) throw badRequest('Будущие назначения пока не поддерживаются');
+      const existing = await tx.customerObjectCoordinatorAssignment.findUnique({ where: { currentCustomerObjectId: objectId } });
+      if (existing && input.startsAt <= existing.startsAt.toISOString().slice(0, 10)) {
+        throw badRequest('Дата нового назначения должна быть позже текущего');
+      }
+      if (existing?.coordinatorId === coordinator.id) throw conflict('Этот координатор уже закреплён за объектом');
+      const operationId = randomUUID();
+      if (existing) {
+        await tx.customerObjectCoordinatorAssignment.update({
+          where: { id: existing.id },
+          data: { endsAt: previousDay(input.startsAt), currentCustomerObjectId: null },
+        });
+      }
+      const created = await tx.customerObjectCoordinatorAssignment.create({
+        data: {
+          customerObjectId: objectId,
+          coordinatorId: coordinator.id,
+          startsAt: dateOnly(input.startsAt),
+          currentCustomerObjectId: objectId,
+          operationId,
+          comment: input.comment ?? null,
+          createdById: actor.id,
+        },
+        include: {
+          coordinator: { include: { user: { select: { fullName: true } } } },
+          customerObject: { select: { id: true, name: true } },
+        },
+      });
+      await audit(tx, {
+        actorId: actor.id,
+        action: 'organization.customer.object.coordinator.assign',
+        entityType: 'CustomerObjectCoordinatorAssignment',
+        entityId: created.id,
+      });
+      return created;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2002', 'P2034'].includes(error.code)) {
+      throw conflict('Назначение координатора объекта изменилось параллельно; обновите данные и повторите операцию');
+    }
+    throw error;
+  }
 }
 
 export async function listWorkTypes(actor: User) {
@@ -486,7 +958,7 @@ export async function createMine(actor: User, baseId: number, input: MineInput) 
     const base = await tx.base.findUnique({ where: { id: baseId } });
     if (!base?.isActive) throw notFound('База не найдена или архивирована');
     const mine = await tx.mine.create({
-      data: { baseId, name: input.name, code: input.code ?? null, createdById: actor.id },
+      data: { baseId, name: input.name, createdById: actor.id },
     });
     await audit(tx, { actorId: actor.id, action: 'mine.create', entityType: 'Mine', entityId: mine.id });
     return mine;
@@ -498,11 +970,75 @@ export async function createWell(actor: User, mineId: number, input: WellInput) 
     const mine = await tx.mine.findUnique({ where: { id: mineId } });
     if (!mine?.isActive) throw notFound('Месторождение не найдено или архивировано');
     await assertBaseAccess(tx, actor, mine.baseId);
+    const clusterNumber = input.clusterNumber?.trim() || null;
+    const pad = clusterNumber
+      ? await tx.wellPad.upsert({
+          where: { mineId_name: { mineId, name: clusterNumber } },
+          update: { isActive: true },
+          create: { mineId, name: clusterNumber, createdById: actor.id },
+        })
+      : null;
     const well = await tx.well.create({
-      data: { mineId, name: input.name, code: input.code ?? null, clusterNumber: input.clusterNumber ?? null, createdById: actor.id },
+      data: { mineId, padId: pad?.id ?? null, name: input.name, code: input.code ?? null, clusterNumber, createdById: actor.id },
     });
     await audit(tx, { actorId: actor.id, action: 'well.create', entityType: 'Well', entityId: well.id });
     return well;
+  });
+}
+
+export async function listPads(actor: User, mineId: number) {
+  await assertMineReadable(actor, mineId);
+  return prisma.wellPad.findMany({
+    where: { mineId },
+    include: { _count: { select: { wells: true } } },
+    orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+  });
+}
+
+export async function createPad(actor: User, mineId: number, input: PadInput) {
+  return prisma.$transaction(async (tx) => {
+    const mine = await tx.mine.findUnique({ where: { id: mineId } });
+    if (!mine?.isActive) throw notFound('Месторождение не найдено или архивировано');
+    await assertBaseAccess(tx, actor, mine.baseId);
+    const name = input.name.trim();
+    const duplicate = await tx.wellPad.findUnique({ where: { mineId_name: { mineId, name } } });
+    if (duplicate) throw conflict('Куст с таким названием уже есть на месторождении');
+    const pad = await tx.wellPad.create({ data: { mineId, name, createdById: actor.id } });
+    await audit(tx, { actorId: actor.id, action: 'organization.pad.create', entityType: 'WellPad', entityId: pad.id });
+    return pad;
+  });
+}
+
+export async function updatePad(actor: User, mineId: number, padId: number, input: PadUpdateInput) {
+  return prisma.$transaction(async (tx) => {
+    const pad = await tx.wellPad.findUnique({ where: { id: padId } });
+    if (!pad || pad.mineId !== mineId) throw notFound('Куст не найден');
+    const mine = await tx.mine.findUnique({ where: { id: mineId } });
+    if (!mine?.isActive) throw notFound('Месторождение не найдено или архивировано');
+    await assertBaseAccess(tx, actor, mine.baseId);
+    const name = input.name?.trim();
+    if (name && name !== pad.name) {
+      const duplicate = await tx.wellPad.findUnique({ where: { mineId_name: { mineId, name } } });
+      if (duplicate) throw conflict('Куст с таким названием уже есть на месторождении');
+    }
+    const updated = await tx.wellPad.update({
+      where: { id: padId },
+      data: {
+        ...(name ? { name } : {}),
+        ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+      },
+    });
+    if (name && name !== pad.name) {
+      await tx.well.updateMany({ where: { padId }, data: { clusterNumber: name } });
+    }
+    await audit(tx, {
+      actorId: actor.id,
+      action: 'organization.pad.update',
+      entityType: 'WellPad',
+      entityId: padId,
+      diff: diffOf(pad, updated, ['name', 'isActive']),
+    });
+    return updated;
   });
 }
 
@@ -833,6 +1369,23 @@ export async function assignEmployeeInTransaction(tx: Tx, actor: User, employeeI
         supervisorUserId = supervisor.user.id;
       }
 
+      let managerEmployeeId = input.managerId ?? existing?.managerId ?? null;
+      if (!managerEmployeeId && roles.includes('MANAGER') && actorEmployee) managerEmployeeId = actorEmployee.id;
+      if (managerEmployeeId) {
+        const managerEmployee = await tx.employee.findUnique({
+          where: { id: managerEmployeeId },
+          include: { user: { select: { id: true, isActive: true, isDeleted: true } } },
+        });
+        const managerAssignment = managerEmployee ? await currentAssignment(tx, managerEmployee.id) : null;
+        const managerRoles = managerEmployee ? await roleCodes(tx, managerEmployee.user.id) : [];
+        if (!managerEmployee || !managerEmployee.user.isActive || managerEmployee.user.isDeleted || !managerAssignment || !managerRoles.includes('MANAGER')) {
+          throw badRequest('Ответственный менеджер должен иметь действующую роль MANAGER');
+        }
+        if (effectiveBaseId !== null && managerAssignment.baseId !== effectiveBaseId) {
+          throw badRequest('Ответственный менеджер должен быть назначен на ту же базу');
+        }
+      }
+
       const existingStart = existing?.startsAt.toISOString().slice(0, 10);
       const replacingUnassignedPlaceholder = existing?.track === 'UNASSIGNED' && input.startsAt === existingStart;
       if (existing && input.startsAt < existingStart!) {
@@ -872,6 +1425,7 @@ export async function assignEmployeeInTransaction(tx: Tx, actor: User, employeeI
           positionId: input.positionId === undefined ? existing?.positionId ?? null : input.positionId,
           baseId: effectiveBaseId,
           supervisorEmployeeId: input.supervisorEmployeeId ?? null,
+          managerId: managerEmployeeId,
           statusId: activeStatus.id,
           track: input.track,
           startsAt: dateOnly(input.startsAt),
@@ -895,6 +1449,7 @@ export async function assignEmployeeInTransaction(tx: Tx, actor: User, employeeI
             positionId: existing.positionId,
             baseId: existing.baseId,
             supervisorEmployeeId: existing.supervisorEmployeeId,
+            managerId: existing.managerId,
             track: existing.track,
           }
         : null;
@@ -903,6 +1458,7 @@ export async function assignEmployeeInTransaction(tx: Tx, actor: User, employeeI
         positionId: next.positionId,
         baseId: next.baseId,
         supervisorEmployeeId: next.supervisorEmployeeId,
+        managerId: next.managerId,
         track: next.track,
       };
       await tx.organizationChange.create({
@@ -1160,13 +1716,28 @@ export async function createCustomer(actor: User, input: CustomerInput) {
   const roles = await roleCodes(prisma, actor.id);
   if (!isAdministrator(actor, roles) && !roles.includes('MANAGER')) throw forbidden();
   return prisma.$transaction(async (tx) => {
-    const customer = await tx.customer.create({ data: { name: input.name, code: input.code ?? null } });
+    const managerBaseId = roles.includes('MANAGER') ? await actorBase(tx, actor) : null;
+    if (roles.includes('MANAGER') && !managerBaseId) throw forbidden();
+    const customer = await tx.customer.create({
+      data: {
+        name: input.name,
+        code: input.code ?? null,
+        address: input.address ?? null,
+        comments: input.comments ?? null,
+        baseId: managerBaseId,
+      },
+    });
     await audit(tx, {
       actorId: actor.id,
       action: 'organization.customer.create',
       entityType: 'Customer',
       entityId: customer.id,
-      diff: { name: { from: null, to: customer.name }, code: { from: null, to: customer.code } },
+      diff: {
+        name: { from: null, to: customer.name },
+        code: { from: null, to: customer.code },
+        address: { from: null, to: customer.address },
+        comments: { from: null, to: customer.comments },
+      },
     });
     return customer;
   });
@@ -1182,7 +1753,9 @@ export async function createContract(actor: User, baseId: number, input: Contrac
     ]);
     if (!base?.isActive) throw notFound('База не найдена или архивирована');
     if (!customer?.isActive) throw badRequest('Заказчик не найден или деактивирован');
+    if (customer.baseId !== null && customer.baseId !== baseId) throw badRequest('Заказчик закреплён за другой базой');
     if (!status?.isActive) throw badRequest('Статус договора не найден или деактивирован');
+    if (status.code === 'ARCHIVED') throw badRequest('Архивация договора выполняется отдельным действием');
     const contract = await tx.contract.create({
       data: {
         baseId,
@@ -1195,6 +1768,9 @@ export async function createContract(actor: User, baseId: number, input: Contrac
       },
       include: { customer: true, base: true, status: true },
     });
+    if (customer.baseId === null) {
+      await tx.customer.update({ where: { id: customer.id }, data: { baseId } });
+    }
     await audit(tx, { actorId: actor.id, action: 'organization.contract.create', entityType: 'Contract', entityId: contract.id });
     return contract;
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -1211,6 +1787,7 @@ export async function updateContract(actor: User, contractId: number, input: Con
     ]);
     if (!customer || (!customer.isActive && customer.id !== existing.customerId)) throw badRequest('Заказчик не найден или деактивирован');
     if (!status || (!status.isActive && status.id !== existing.statusId)) throw badRequest('Статус договора не найден или деактивирован');
+    if (status.code === 'ARCHIVED' && existing.status.code !== 'ARCHIVED') throw badRequest('Архивация договора выполняется отдельным действием');
 
     const startsAt = dateOnly(input.startsAt);
     const endsAt = dateOnly(input.endsAt);
@@ -1618,7 +2195,7 @@ export async function getEmployee(actor: User, userId: number) {
       },
       assignments: {
         orderBy: { startsAt: 'desc' },
-        include: { position: true, base: true, status: true, supervisor: { include: { user: { select: { fullName: true } } } } },
+        include: { position: true, base: true, status: true, supervisor: { include: { user: { select: { fullName: true } } } }, manager: { include: { user: { select: { fullName: true } } } } },
       },
     },
   });

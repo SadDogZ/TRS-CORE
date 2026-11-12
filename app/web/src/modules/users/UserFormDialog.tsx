@@ -9,13 +9,15 @@ import { useForm } from '../../core/form.ts';
 export type UserDialogMode = 'create' | 'view' | 'edit';
 type Track = 'TRS' | 'R_AND_M';
 interface Base { id: number; name: string }
-interface EmployeeOption { id: number; user: { fullName: string; systemRoles: { systemRole: { code: string } }[] }; assignments: { baseId: number | null; track: Track | 'UNASSIGNED' }[] }
-interface EmployeeAssignment { track: Track | 'UNASSIGNED'; baseId: number | null; supervisorEmployeeId: number | null; startsAt: string }
+interface EmployeeOption { id: number; user: { id: number; fullName: string; systemRoles: { systemRole: { code: string } }[] }; assignments: { baseId: number | null; track: Track | 'UNASSIGNED' }[] }
+interface EmployeeAssignment { track: Track | 'UNASSIGNED'; baseId: number | null; supervisorEmployeeId: number | null; managerId?: number | null; startsAt: string }
 interface Props {
   open: boolean;
   mode: UserDialogMode;
   user?: UserDto;
+  employeeId?: number;
   personnel?: boolean;
+  allowEdit?: boolean;
   assignment?: EmployeeAssignment;
   onClose: () => void;
   onModeChange?: (mode: UserDialogMode) => void;
@@ -33,25 +35,27 @@ const empty = (user?: UserDto) => ({
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-export function UserFormDialog({ open, mode, user, personnel = false, assignment, onClose, onModeChange }: Props) {
+export function UserFormDialog({ open, mode, user, employeeId, personnel = false, allowEdit = true, assignment, onClose, onModeChange }: Props) {
   const me = useCurrentUser();
   const isEdit = mode === 'edit';
   const isView = mode === 'view';
   const isSelf = user?.id === me.id;
   const form = useForm(empty(user));
   const { reset } = form;
-  const positions = useQuery(open ? 'admin:positions:all' : null, () => api.get<PositionDto[]>('/admin/positions', { archived: true }));
+  const positions = useQuery(open ? (personnel ? 'org:positions' : 'admin:positions:all') : null, () => api.get<PositionDto[]>(personnel ? '/org/positions' : '/admin/positions', personnel ? undefined : { archived: true }));
   const bases = useQuery(open && personnel ? 'org:bases' : null, () => api.get<Base[]>('/org/bases'));
   const employees = useQuery(open && personnel ? 'org:employees' : null, () => api.get<EmployeeOption[]>('/org/employees'));
   const [track, setTrack] = useState<Track>(assignment?.track === 'R_AND_M' ? 'R_AND_M' : 'TRS');
   const [baseId, setBaseId] = useState(assignment?.baseId ? String(assignment.baseId) : '');
   const [supervisorId, setSupervisorId] = useState(assignment?.supervisorEmployeeId ? String(assignment.supervisorEmployeeId) : '');
+  const [managerId, setManagerId] = useState(assignment?.managerId ? String(assignment.managerId) : '');
   const [startsAt, setStartsAt] = useState(assignment?.startsAt?.slice(0, 10) ?? today());
   const positionOptions = (positions.data ?? []).filter((position) => !position.isArchived || position.id === user?.positionId);
   const selectedPosition = positionOptions.find((position) => String(position.id) === form.values.positionId);
   const roleCode = selectedPosition?.systemRole.code ?? '';
   const requiredSupervisor = roleCode === 'COORDINATOR' ? 'MANAGER' : roleCode === 'EMPLOYEE' ? 'COORDINATOR' : roleCode === 'MECHANIC' ? 'SENIOR_MECHANIC' : roleCode === 'SHOP_FOREMAN' ? 'MECHANIC' : roleCode === 'SHOP_EMPLOYEE' ? 'SHOP_FOREMAN' : '';
   const supervisors = (employees.data ?? []).filter((employee) => employee.user.systemRoles.some((grant) => grant.systemRole.code === requiredSupervisor) && (!baseId || employee.assignments[0]?.baseId === Number(baseId)) && (!track || employee.assignments[0]?.track === track));
+  const managers = (employees.data ?? []).filter((employee) => employee.user.systemRoles.some((grant) => grant.systemRole.code === 'MANAGER') && (!baseId || employee.assignments[0]?.baseId === Number(baseId)));
 
   useEffect(() => {
     if (!open) return;
@@ -59,12 +63,22 @@ export function UserFormDialog({ open, mode, user, personnel = false, assignment
     setTrack(assignment?.track === 'R_AND_M' ? 'R_AND_M' : 'TRS');
     setBaseId(assignment?.baseId ? String(assignment.baseId) : '');
     setSupervisorId(assignment?.supervisorEmployeeId ? String(assignment.supervisorEmployeeId) : '');
+    if (assignment?.managerId) {
+      setManagerId(String(assignment.managerId));
+    } else if (!assignment) {
+      const ownManagerEmployee = (employees.data ?? []).find((employee) => employee.user.systemRoles.some((grant) => grant.systemRole.code === 'MANAGER') && employee.user.id === me.id);
+      setManagerId(ownManagerEmployee ? String(ownManagerEmployee.id) : '');
+    } else {
+      setManagerId('');
+    }
     setStartsAt(assignment?.startsAt?.slice(0, 10) ?? today());
-  }, [open, user, assignment, reset]);
+  }, [open, user, assignment, reset, employees.data, me.id]);
 
   const save = useAction(async (data: unknown) => {
     if (isEdit) {
-      const result = await api.patch(`/admin/users/${user!.id}`, data);
+      const result = personnel && employeeId
+        ? await api.patch(`/org/employees/${employeeId}/account`, data)
+        : await api.patch(`/admin/users/${user!.id}`, data);
       if (personnel && assignment?.track === 'UNASSIGNED' && (baseId || roleCode === 'SENIOR_MECHANIC') && startsAt) {
         const employee = await api.get<{ id: number }>(`/org/users/${user!.id}/employee`);
         await api.post(`/org/employees/${employee.id}/assignments`, {
@@ -72,19 +86,24 @@ export function UserFormDialog({ open, mode, user, personnel = false, assignment
           ...(baseId ? { baseId: Number(baseId) } : {}),
           positionId: Number(form.values.positionId),
           supervisorEmployeeId: supervisorId ? Number(supervisorId) : null,
+          managerId: managerId ? Number(managerId) : null,
           startsAt,
         });
+      } else if (personnel && employeeId && managerId && String(assignment?.managerId ?? '') !== managerId) {
+        await api.patch(`/org/employees/${employeeId}/manager`, { managerId: Number(managerId) });
       }
-      return api.get<{ user: UserDto }>(`/admin/users/${user!.id}`).then((response) => response.user ?? result);
+      const detailsPath = personnel && employeeId ? `/org/employees/${employeeId}/account` : `/admin/users/${user!.id}`;
+      return api.get<{ user: UserDto }>(detailsPath).then((response) => response.user ?? result);
     }
     if (personnel) {
-      return api.post('/admin/users/personnel', {
+      return api.post(me.systemRoles.includes('ADMIN') ? '/admin/users/personnel' : '/org/employees/personnel', {
         user: data,
         assignment: {
           track,
           ...(baseId ? { baseId: Number(baseId) } : {}),
           positionId: Number(form.values.positionId),
           supervisorEmployeeId: supervisorId ? Number(supervisorId) : null,
+          managerId: managerId ? Number(managerId) : null,
           startsAt,
         },
       });
@@ -107,7 +126,8 @@ export function UserFormDialog({ open, mode, user, personnel = false, assignment
     const valid = isEdit ? form.validate(updateUserSchema, payload) : form.validate(createUserSchema, payload);
     if (!valid) return;
     const requiresBase = roleCode !== 'SENIOR_MECHANIC';
-    if (personnel && ((!baseId && requiresBase) || !startsAt || (requiredSupervisor && !supervisorId))) {
+    const assignmentRequired = personnel && (!isEdit || assignment?.track === 'UNASSIGNED');
+    if (assignmentRequired && ((!baseId && requiresBase) || !startsAt || (requiredSupervisor && !supervisorId) || !managerId)) {
       form.setErrors({ ...form.errors, positionId: 'Выберите должность, базу, дату назначения и руководителя' });
       return;
     }
@@ -119,7 +139,7 @@ export function UserFormDialog({ open, mode, user, personnel = false, assignment
 
   return (
     <Dialog open={open} wide title={title} onClose={onClose} onSubmit={isView ? undefined : submit}
-      actions={isView ? <><button type="button" className="btn btn-primary" onClick={() => onModeChange?.('edit')}>Редактировать</button><button type="button" className="btn" onClick={onClose}>Закрыть</button></> : <><button type="button" className="btn" onClick={onClose}>Отмена</button><button type="submit" className="btn btn-primary" disabled={save.pending}>{isEdit ? 'Сохранить' : 'Создать'}</button></>}>
+      actions={isView ? <>{allowEdit && <button type="button" className="btn btn-primary" onClick={() => onModeChange?.('edit')}>Редактировать</button>}<button type="button" className="btn" onClick={onClose}>Закрыть</button></> : <><button type="button" className="btn" onClick={onClose}>Отмена</button><button type="submit" className="btn btn-primary" disabled={save.pending}>{isEdit ? 'Сохранить' : 'Создать'}</button></>}>
       <TextField label="ФИО *" disabled={isView} {...form.field('fullName')} />
       <div className="form-grid">
         <TextField label="Логин *" disabled={isView || isEdit} {...form.field('login')} />
@@ -141,6 +161,9 @@ export function UserFormDialog({ open, mode, user, personnel = false, assignment
           {requiredSupervisor && <SelectField label="Непосредственный руководитель *" disabled={isEdit && !!assignment && assignment.track !== 'UNASSIGNED'} value={supervisorId} onChange={(event) => setSupervisorId(event.target.value)}>
             <option value="">Выберите руководителя</option>{supervisors.map((employee) => <option key={employee.id} value={employee.id}>{employee.user.fullName}</option>)}
           </SelectField>}
+          <SelectField label="Ответственный менеджер *" disabled={isView} value={managerId} onChange={(event) => setManagerId(event.target.value)}>
+            <option value="">Выберите менеджера</option>{managers.map((employee) => <option key={employee.id} value={employee.id}>{employee.user.fullName}</option>)}
+          </SelectField>
           <TextField label="Дата начала назначения *" disabled={isEdit && !!assignment && assignment.track !== 'UNASSIGNED'} type="date" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} />
         </div>
         {isEdit && <p className="muted small">Текущее направление: {assignment?.track ?? 'не назначено'} · база ID {assignment?.baseId ?? 'не задана'}. Изменение должности сразу синхронизирует системную роль.</p>}

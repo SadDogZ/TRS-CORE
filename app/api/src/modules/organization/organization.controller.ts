@@ -28,16 +28,46 @@ export async function listWells(req: Request, res: Response) {
   res.json(await service.listWells(currentUser(req), idParam(req, 'mineId')));
 }
 
+export async function listPads(req: Request, res: Response) {
+  res.json(await service.listPads(currentUser(req), idParam(req, 'mineId')));
+}
+
+export async function createPad(req: Request, res: Response) {
+  res.status(201).json(await service.createPad(currentUser(req), idParam(req, 'mineId'), req.body));
+}
+
+export async function updatePad(req: Request, res: Response) {
+  res.json(await service.updatePad(currentUser(req), idParam(req, 'mineId'), idParam(req, 'padId'), req.body));
+}
+
+export async function setEmployeeManager(req: Request, res: Response) {
+  res.json(await service.setEmployeeManager(currentUser(req), idParam(req, 'employeeId'), req.body.managerId));
+}
+
 export async function listCustomerSiteWorksForWell(req: Request, res: Response) {
   res.json(await service.listCustomerSiteWorksForWell(currentUser(req), idParam(req, 'wellId')));
 }
 
 export async function listContracts(req: Request, res: Response) {
-  res.json(await service.listContracts(currentUser(req), idParam(req, 'baseId')));
+  const includeArchived = req.query.includeArchived === 'true' || req.query.includeArchived === '1';
+  res.json(await service.listContracts(currentUser(req), idParam(req, 'baseId'), includeArchived));
+}
+
+export async function archiveContract(req: Request, res: Response) {
+  res.json(await service.archiveContract(currentUser(req), idParam(req, 'contractId')));
 }
 
 export async function listCustomers(req: Request, res: Response) {
   res.json(await service.listCustomers(currentUser(req)));
+}
+
+export async function listCustomerDirectory(req: Request, res: Response) {
+  const search = typeof req.query.search === 'string' ? req.query.search : undefined;
+  res.json(await service.listCustomerDirectory(currentUser(req), search));
+}
+
+export async function getCustomerDetails(req: Request, res: Response) {
+  res.json(await service.getCustomerDetails(currentUser(req), idParam(req, 'customerId')));
 }
 
 export async function listWorkTypes(req: Request, res: Response) {
@@ -62,6 +92,26 @@ export async function listAdminCustomers(_req: Request, res: Response) {
 
 export async function updateCustomer(req: Request, res: Response) {
   res.json(await service.updateCustomer(currentUser(req), idParam(req, 'customerId'), req.body));
+}
+
+export async function createCustomerRepresentative(req: Request, res: Response) {
+  res.status(201).json(await service.createCustomerRepresentative(currentUser(req), idParam(req, 'customerId'), req.body));
+}
+
+export async function updateCustomerRepresentative(req: Request, res: Response) {
+  res.json(await service.updateCustomerRepresentative(currentUser(req), idParam(req, 'customerId'), idParam(req, 'representativeId'), req.body));
+}
+
+export async function createCustomerObject(req: Request, res: Response) {
+  res.status(201).json(await service.createCustomerObject(currentUser(req), idParam(req, 'customerId'), req.body));
+}
+
+export async function updateCustomerObject(req: Request, res: Response) {
+  res.json(await service.updateCustomerObject(currentUser(req), idParam(req, 'customerId'), idParam(req, 'objectId'), req.body));
+}
+
+export async function assignCustomerObjectCoordinator(req: Request, res: Response) {
+  res.status(201).json(await service.assignCustomerObjectCoordinator(currentUser(req), idParam(req, 'objectId'), req.body));
 }
 
 export async function createContract(req: Request, res: Response) {

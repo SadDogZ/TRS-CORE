@@ -1,13 +1,24 @@
 // Режим разработки: пересборка клиента (esbuild --watch) + сервер с перезапуском (node --watch).
 // Открывать http://localhost:5500 — клиент раздаёт тот же сервер.
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const dir = (relative) => fileURLToPath(new URL(relative, import.meta.url));
+const apiCwd = dir('../app/api/');
+const apiEnvPath = join(apiCwd, '.env');
+const apiEnvExamplePath = join(apiCwd, '.env.example');
+const apiEnvArg = existsSync(apiEnvPath)
+  ? '--env-file=.env'
+  : existsSync(apiEnvExamplePath)
+    ? '--env-file=.env.example'
+    : null;
+const apiArgs = ['--watch', ...(apiEnvArg ? [apiEnvArg] : []), 'src/server.ts'];
 
 const processes = [
   ['web', ['build.mjs', '--watch'], dir('../app/web/')],
-  ['api', ['--watch', '--env-file=.env', 'src/server.ts'], dir('../app/api/')],
+  ['api', apiArgs, apiCwd],
 ].map(([name, args, cwd]) => {
   const child = spawn(process.execPath, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
   const prefix = (stream, out) =>

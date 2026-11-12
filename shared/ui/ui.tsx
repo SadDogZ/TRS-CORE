@@ -31,12 +31,13 @@ interface FieldBase {
   label: string;
   error?: string;
   help?: string;
+  hoverHint?: string;
 }
 
-function FieldWrap({ id, label, error, help, children }: FieldBase & { id: string; children: ReactNode }) {
+function FieldWrap({ id, label, error, help, hoverHint, children }: FieldBase & { id: string; children: ReactNode }) {
   return (
     <div className={`field${error ? ' invalid' : ''}`}>
-      <label htmlFor={id}>{label}</label>
+      <label htmlFor={id} title={hoverHint}>{label}</label>
       {children}
       {(error || help) && <div className="help">{error ?? help}</div>}
     </div>

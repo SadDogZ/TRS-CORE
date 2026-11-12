@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { api, errorMessage } from '../../core/api.ts';
 import type { PositionDto } from '@app/shared';
 import { useCurrentUser } from '../../core/auth.tsx';
 import { invalidate, useAction, useQuery } from '../../core/data.ts';
-import { Alert, Icon, PageHeader, SelectField, TextField } from '@app/shared/ui';
+import { Alert, Dialog, Icon, PageHeader, SelectField, TextField } from '@app/shared/ui';
 import { ActionError } from '../../widgets/feedback/ActionError';
 
 interface Base { id: number; name: string; code: string | null }
@@ -32,7 +32,15 @@ interface Employee {
   }[];
   mineAssignments?: { mine: { id: number; name: string } }[];
 }
-interface Mine { id: number; name: string; code: string | null; baseId: number; base: Base; coordinatorAssignments?: { coordinator: { user: { fullName: string } } }[] }
+interface Mine {
+  id: number;
+  name: string;
+  baseId: number;
+  base: Base;
+  _count?: { pads: number; wells: number };
+  coordinatorAssignments?: { coordinator: { user: { fullName: string } } }[];
+}
+interface PadRow { id: number; name: string; isActive: boolean; _count?: { wells: number } }
 
 const today = () => {
   const date = new Date();
@@ -55,11 +63,12 @@ export function OrganizationPage({ view = 'overview' }: { view?: OrganizationVie
   const [startsAt, setStartsAt] = useState(today());
   const [reason, setReason] = useState('');
   const [mineName, setMineName] = useState('');
-  const [mineCode, setMineCode] = useState('');
-  const [wellMineId, setWellMineId] = useState('');
-  const [wellName, setWellName] = useState('');
-  const [wellCode, setWellCode] = useState('');
-  const [wellClusterNumber, setWellClusterNumber] = useState('');
+  const [mineBaseId, setMineBaseId] = useState('');
+  const [mineDialogOpen, setMineDialogOpen] = useState(false);
+  const [mineDetailsId, setMineDetailsId] = useState<number | null>(null);
+  const [padName, setPadName] = useState('');
+  const [padDialog, setPadDialog] = useState<{ open: boolean; editing: PadRow | null }>({ open: false, editing: null });
+  const [showArchivedPads, setShowArchivedPads] = useState(false);
   const [coordinatorByMine, setCoordinatorByMine] = useState<Record<number, string>>({});
   const [transferDateByMine, setTransferDateByMine] = useState<Record<number, string>>({});
   const [errorMessageText, setErrorMessageText] = useState('');
@@ -85,6 +94,8 @@ export function OrganizationPage({ view = 'overview' }: { view?: OrganizationVie
   const transferCoordinators = employees.filter((employee) => employee.user.systemRoles.some((grant) => grant.systemRole.code === 'COORDINATOR') && employee.assignments[0]?.track === 'TRS' && employee.assignments[0]?.baseId === Number(selectedBaseId));
   const minesQuery = useQuery('org:mines', () => api.get<Mine[]>('/org/mines'));
   const mines = minesQuery.data ?? [];
+  const selectedMine = mineDetailsId ? mines.find((mine) => mine.id === mineDetailsId) ?? null : null;
+  const selectedMinePads = useQuery(mineDetailsId ? `org:mines:${mineDetailsId}:pads` : null, () => api.get<PadRow[]>(`/org/mines/${mineDetailsId}/pads`));
   const coordinators = employees.filter((employee) => employee.user.systemRoles.some((grant) => grant.systemRole.code === 'COORDINATOR'));
   const coordinatorsForMine = (mine: Mine) => coordinators.filter((employee) => employee.assignments[0]?.track === 'TRS' && employee.assignments[0]?.baseId === mine.baseId);
   const showStructure = view === 'overview' || view === 'structure';
@@ -96,22 +107,31 @@ export function OrganizationPage({ view = 'overview' }: { view?: OrganizationVie
     invalidate('admin:');
   };
 
-  const createMine = useAction((baseId: number) => api.post(`/org/bases/${baseId}/mines`, { name: mineName, code: mineCode || null }), {
+  const createMine = useAction((baseId: number) => api.post(`/org/bases/${baseId}/mines`, { name: mineName }), {
     onSuccess: () => {
       setMineName('');
-      setMineCode('');
+      setMineDialogOpen(false);
       refresh();
     },
   });
-  const createWell = useAction((mineId: number) => api.post(`/org/mines/${mineId}/wells`, {
-    name: wellName,
-    code: wellCode || null,
-    clusterNumber: wellClusterNumber || null,
-  }), {
+  const savePad = useAction(async () => {
+    if (!selectedMine) return;
+    if (padDialog.editing) {
+      await api.patch(`/org/mines/${selectedMine.id}/pads/${padDialog.editing.id}`, { name: padName.trim(), isActive: padDialog.editing.isActive });
+    } else {
+      await api.post(`/org/mines/${selectedMine.id}/pads`, { name: padName.trim() });
+    }
+  }, {
     onSuccess: () => {
-      setWellName('');
-      setWellCode('');
-      setWellClusterNumber('');
+      setPadDialog({ open: false, editing: null });
+      setPadName('');
+      selectedMinePads.reload();
+      refresh();
+    },
+  });
+  const archivePad = useAction((pad: PadRow) => api.patch(`/org/mines/${selectedMine!.id}/pads/${pad.id}`, { isActive: !pad.isActive }), {
+    onSuccess: () => {
+      selectedMinePads.reload();
       refresh();
     },
   });
@@ -143,12 +163,6 @@ export function OrganizationPage({ view = 'overview' }: { view?: OrganizationVie
     },
     onError: (error) => setErrorMessageText(errorMessage(error)),
   });
-
-  const mineByBase = useMemo(() => {
-    const grouped = new Map<number, Mine[]>();
-    for (const mine of mines) grouped.set(mine.baseId, [...(grouped.get(mine.baseId) ?? []), mine]);
-    return grouped;
-  }, [mines]);
 
   return (
     <>
@@ -269,103 +283,121 @@ export function OrganizationPage({ view = 'overview' }: { view?: OrganizationVie
       )}
 
       {showStructure && <section className="panel" style={{ padding: 18 }}>
-        <h2 className="section-title">Месторождения</h2>
-        {isAdmin && <p className="muted">Сначала добавьте базу в «Справочники → Базы». Затем выберите её здесь и создайте для неё месторождение; скважины добавляются ниже в карточке месторождения.</p>}
-        {Array.from(mineByBase.entries()).map(([baseId, baseMines]) => {
-          const base = bases.find((item) => item.id === baseId);
-          return <div key={baseId} style={{ marginBottom: 20 }}>
-            <h3>{base?.name ?? baseMines[0]?.base.name}</h3>
-            {baseMines.map((mine) => <MineRow
-              key={mine.id}
-              mine={mine}
-              canManage={isAdmin || isManager}
-              coordinators={coordinatorsForMine(mine)}
-              selectedCoordinatorId={coordinatorByMine[mine.id] ?? ''}
-              startsAt={transferDateByMine[mine.id] ?? today()}
-              onCoordinatorChange={(value) => setCoordinatorByMine((state) => ({ ...state, [mine.id]: value }))}
-              onDateChange={(value) => setTransferDateByMine((state) => ({ ...state, [mine.id]: value }))}
-              onAssign={async () => {
-                await assignMineCoordinator.run({
-                  mineId: mine.id,
-                  coordinatorEmployeeId: Number(coordinatorByMine[mine.id]),
-                  startsAt: transferDateByMine[mine.id] ?? today(),
-                });
-              }}
-              pending={assignMineCoordinator.pending}
-              currentCoordinator={mine.coordinatorAssignments?.[0]?.coordinator.user.fullName ?? null}
-            />)}
-          </div>;
-        })}
-        {mines.length === 0 && <div className="empty">Месторождения пока не созданы или не назначены вашей роли.</div>}
-        {(isAdmin || isManager) && (
-          <form className="row wrap" style={{ alignItems: 'flex-end', marginTop: 18 }} onSubmit={(event) => {
-            event.preventDefault();
-            const baseId = isAdmin ? Number(selectedBaseId) : signedInEmployee?.assignments[0]?.baseId;
-            if (baseId) createMine.run(baseId);
-          }}>
-            {isAdmin && <SelectField label="База" value={selectedBaseId} onChange={(event) => setSelectedBaseId(event.target.value)}>
-              <option value="">Выберите базу</option>
-              {bases.map((base) => <option key={base.id} value={base.id}>{base.name}</option>)}
-            </SelectField>}
-            <TextField label="Новое месторождение" value={mineName} onChange={(event) => setMineName(event.target.value)} />
-            <TextField label="Код" value={mineCode} onChange={(event) => setMineCode(event.target.value)} />
-            <button className="btn btn-primary" disabled={createMine.pending || !mineName.trim() || (isAdmin && !selectedBaseId)}><Icon name="add" small /> Добавить</button>
-          </form>
-        )}
+        <div className="row between" style={{ marginBottom: 12 }}>
+          <h2 className="section-title">Месторождения</h2>
+          {(isAdmin || isManager) && <button type="button" className="btn btn-primary" onClick={() => {
+            setMineName('');
+            setMineBaseId(isAdmin ? '' : String(signedInEmployee?.assignments[0]?.baseId ?? ''));
+            setMineDialogOpen(true);
+          }}><Icon name="add" small /> Новое месторождение</button>}
+        </div>
+        <div className="table-wrap">
+          <table className="table">
+            <thead><tr><th>Месторождение</th><th>База</th><th>Координатор</th><th>Кусты</th><th>Действия</th></tr></thead>
+            <tbody>
+              {mines.map((mine) => <tr key={mine.id} className="clickable" role="button" tabIndex={0} onClick={() => setMineDetailsId(mine.id)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setMineDetailsId(mine.id); } }}>
+                <td>{mine.name}</td>
+                <td>{mine.base.name}</td>
+                <td>{mine.coordinatorAssignments?.[0]?.coordinator.user.fullName ?? 'Не назначен'}</td>
+                <td>{mine._count?.pads ?? 0}</td>
+                <td><button type="button" className="btn btn-sm" onClick={(event) => { event.stopPropagation(); setMineDetailsId(mine.id); }}>Открыть</button></td>
+              </tr>)}
+            </tbody>
+          </table>
+          {mines.length === 0 && <div className="empty">Месторождения пока не созданы или не назначены вашей роли.</div>}
+        </div>
         <ActionError error={createMine.error} />
-        {(isAdmin || isManager) && <form className="row wrap" style={{ alignItems: 'flex-end', marginTop: 18 }} onSubmit={(event) => {
-          event.preventDefault();
-          if (wellMineId) createWell.run(Number(wellMineId));
-        }}>
-          <SelectField label="Месторождение" value={wellMineId} onChange={(event) => setWellMineId(event.target.value)}>
-            <option value="">Выберите месторождение</option>
-            {mines.map((mine) => <option key={mine.id} value={mine.id}>{mine.base.name} · {mine.name}</option>)}
-          </SelectField>
-          <TextField label="Новая скважина" value={wellName} onChange={(event) => setWellName(event.target.value)} />
-          <TextField label="Код" value={wellCode} onChange={(event) => setWellCode(event.target.value)} />
-          <TextField label="Номер куста" value={wellClusterNumber} onChange={(event) => setWellClusterNumber(event.target.value)} />
-          <button className="btn btn-primary" disabled={createWell.pending || !wellMineId || !wellName.trim()}><Icon name="add" small /> Добавить скважину</button>
-        </form>}
-        <ActionError error={createWell.error} />
       </section>}
+
+      <Dialog
+        open={mineDialogOpen}
+        title="Новое месторождение"
+        onClose={() => setMineDialogOpen(false)}
+        onSubmit={() => {
+          const baseId = isAdmin ? Number(mineBaseId) : signedInEmployee?.assignments[0]?.baseId;
+          if (baseId) createMine.run(baseId);
+        }}
+        actions={<><button type="button" className="btn" onClick={() => setMineDialogOpen(false)}>Отмена</button><button type="submit" className="btn btn-primary" disabled={createMine.pending || !mineName.trim() || (isAdmin && !mineBaseId)}>Создать</button></>}
+      >
+        {isAdmin && <SelectField label="База *" value={mineBaseId} onChange={(event) => setMineBaseId(event.target.value)}>
+          <option value="">Выберите базу</option>
+          {bases.map((base) => <option key={base.id} value={base.id}>{base.name}</option>)}
+        </SelectField>}
+        <TextField label="Название месторождения *" value={mineName} onChange={(event) => setMineName(event.target.value)} />
+        <ActionError error={createMine.error} />
+      </Dialog>
+
+      <Dialog
+        open={!!mineDetailsId}
+        wide
+        title={selectedMine ? `Месторождение: ${selectedMine.name}` : 'Месторождение'}
+        onClose={() => setMineDetailsId(null)}
+        actions={<button type="button" className="btn" onClick={() => setMineDetailsId(null)}>Закрыть</button>}
+      >
+        {selectedMine && <div className="stack">
+          <section className="panel pad">
+            <div className="row wrap">
+              <span className="muted">База: {selectedMine.base.name}</span>
+              <span className="muted">Текущий координатор: {selectedMine.coordinatorAssignments?.[0]?.coordinator.user.fullName ?? 'Не назначен'}</span>
+            </div>
+            {(isAdmin || isManager) && <div className="row wrap" style={{ marginTop: 8 }}>
+              <SelectField label="Координатор проекта" value={coordinatorByMine[selectedMine.id] ?? ''} onChange={(event) => setCoordinatorByMine((state) => ({ ...state, [selectedMine.id]: event.target.value }))}>
+                <option value="">Выберите координатора</option>
+                {coordinatorsForMine(selectedMine).map((coordinator) => <option key={coordinator.id} value={coordinator.id}>{coordinator.user.fullName}</option>)}
+              </SelectField>
+              <TextField label="Дата назначения" type="date" value={transferDateByMine[selectedMine.id] ?? today()} onChange={(event) => setTransferDateByMine((state) => ({ ...state, [selectedMine.id]: event.target.value }))} />
+              <button
+                type="button"
+                className="btn"
+                disabled={assignMineCoordinator.pending || !coordinatorsForMine(selectedMine).some((coordinator) => String(coordinator.id) === (coordinatorByMine[selectedMine.id] ?? ''))}
+                onClick={() => assignMineCoordinator.run({ mineId: selectedMine.id, coordinatorEmployeeId: Number(coordinatorByMine[selectedMine.id]), startsAt: transferDateByMine[selectedMine.id] ?? today() })}
+              >Назначить координатора</button>
+            </div>}
+            <ActionError error={assignMineCoordinator.error} />
+          </section>
+
+          <section className="panel pad">
+            <div className="row between wrap">
+              <h3>Кусты</h3>
+              <div className="row wrap">
+                <button type="button" className={`btn btn-sm${!showArchivedPads ? ' btn-primary' : ''}`} onClick={() => setShowArchivedPads(false)}>Активные</button>
+                <button type="button" className={`btn btn-sm${showArchivedPads ? ' btn-primary' : ''}`} onClick={() => setShowArchivedPads(true)}>Архив</button>
+                {(isAdmin || isManager) && <button type="button" className="btn btn-sm" onClick={() => { setPadName(''); setPadDialog({ open: true, editing: null }); }}>Добавить</button>}
+              </div>
+            </div>
+            {selectedMinePads.error && <Alert>{selectedMinePads.error}</Alert>}
+            <div className="table-wrap">
+              <table className="table">
+                <thead><tr><th>Название</th><th>Скважины</th><th>Статус</th>{(isAdmin || isManager) && <th>Действия</th>}</tr></thead>
+                <tbody>
+                  {(selectedMinePads.data ?? []).filter((pad) => showArchivedPads ? !pad.isActive : pad.isActive).map((pad) => <tr key={pad.id}>
+                    <td>{pad.name}</td>
+                    <td>{pad._count?.wells ?? 0}</td>
+                    <td>{pad.isActive ? 'Активен' : 'В архиве'}</td>
+                    {(isAdmin || isManager) && <td className="row wrap">
+                      <button type="button" className="btn btn-sm" onClick={() => { setPadName(pad.name); setPadDialog({ open: true, editing: pad }); }}>Изменить</button>
+                      <button type="button" className="btn btn-sm" disabled={archivePad.pending} onClick={() => archivePad.run(pad)}>{pad.isActive ? 'В архив' : 'Вернуть'}</button>
+                    </td>}
+                  </tr>)}
+                </tbody>
+              </table>
+              {(selectedMinePads.data ?? []).filter((pad) => showArchivedPads ? !pad.isActive : pad.isActive).length === 0 && <div className="empty">{showArchivedPads ? 'Архивных кустов нет.' : 'Кусты не добавлены.'}</div>}
+            </div>
+            <ActionError error={savePad.error ?? archivePad.error} />
+          </section>
+        </div>}
+      </Dialog>
+
+      <Dialog
+        open={padDialog.open}
+        title={padDialog.editing ? 'Изменить куст' : 'Новый куст'}
+        onClose={() => setPadDialog({ open: false, editing: null })}
+        onSubmit={() => savePad.run()}
+        actions={<><button type="button" className="btn" onClick={() => setPadDialog({ open: false, editing: null })}>Отмена</button><button type="submit" className="btn btn-primary" disabled={savePad.pending || !padName.trim()}>Сохранить</button></>}
+      >
+        <TextField label="Название куста *" value={padName} onChange={(event) => setPadName(event.target.value)} />
+        <ActionError error={savePad.error} />
+      </Dialog>
     </>
   );
-}
-
-function MineRow({
-  mine,
-  canManage,
-  coordinators,
-  selectedCoordinatorId,
-  startsAt,
-  onCoordinatorChange,
-  onDateChange,
-  onAssign,
-  pending,
-  currentCoordinator,
-}: {
-  mine: Mine;
-  canManage: boolean;
-  coordinators: Employee[];
-  selectedCoordinatorId: string;
-  startsAt: string;
-  onCoordinatorChange: (value: string) => void;
-  onDateChange: (value: string) => void;
-  onAssign: () => void;
-  pending: boolean;
-  currentCoordinator: string | null;
-}) {
-  const wellsQuery = useQuery(`org:wells:${mine.id}`, () => api.get<{ id: number; name: string; code: string | null }[]>(`/org/mines/${mine.id}/wells`));
-  return <div className="row wrap" style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-    <strong>{mine.name}</strong><span className="muted">{mine.code ?? ''}</span>
-    <span>Координатор: {currentCoordinator ?? 'не назначен'}</span>
-    <span>{wellsQuery.data?.length ?? 0} скважин</span>
-    {wellsQuery.error && <span className="danger">{wellsQuery.error}</span>}
-    {canManage && <SelectField label="Координатор проекта" value={selectedCoordinatorId} onChange={(event) => onCoordinatorChange(event.target.value)}>
-      <option value="">Выберите координатора</option>
-      {coordinators.map((coordinator) => <option key={coordinator.id} value={coordinator.id}>{coordinator.user.fullName}</option>)}
-    </SelectField>}
-    {canManage && <TextField label="Дата назначения" type="date" value={startsAt} onChange={(event) => onDateChange(event.target.value)} />}
-    {canManage && <button type="button" className="btn" disabled={pending || !coordinators.some((coordinator) => String(coordinator.id) === selectedCoordinatorId)} onClick={onAssign}>Назначить координатора</button>}
-  </div>;
 }

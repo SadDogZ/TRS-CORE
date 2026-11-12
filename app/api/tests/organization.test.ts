@@ -987,3 +987,156 @@ describe('системные роли и справочники статусов
     );
   });
 });
+
+describe('персонал менеджера, кусты и архив договоров', () => {
+  it('менеджер редактирует только персонал своей базы и назначает менеджера явно', async () => {
+    const ctx = await setup();
+    const outsider = await createUser('EMPLOYEE');
+    const outsiderCard = await prisma.employee.findUniqueOrThrow({ where: { userId: outsider.id } });
+    await prisma.employeeAssignment.update({
+      where: { activeEmployeeId: outsiderCard.id },
+      data: { baseId: ctx.otherBaseId, track: 'TRS' },
+    });
+
+    const visible = await api('GET', '/api/org/employees', { token: ctx.managerToken });
+    assert.equal(visible.status, 200);
+    const visibleIds = visible.body.map((row: { id: number }) => row.id);
+    assert.ok(visibleIds.includes(ctx.employeeCard.id));
+    assert.equal(visibleIds.includes(outsiderCard.id), false);
+
+    const positions = await api('GET', '/api/org/positions', { token: ctx.managerToken });
+    assert.equal(positions.status, 200);
+    assert.equal((await api('GET', '/api/admin/positions', { token: ctx.managerToken })).status, 403);
+
+    const renamed = await api('PATCH', `/api/org/employees/${ctx.employeeCard.id}/account`, {
+      token: ctx.managerToken,
+      body: { fullName: 'Сотрудник своей базы' },
+    });
+    assert.equal(renamed.status, 200, JSON.stringify(renamed.body));
+    assert.equal(renamed.body.fullName, 'Сотрудник своей базы');
+
+    const foreignEdit = await api('PATCH', `/api/org/employees/${outsiderCard.id}/account`, {
+      token: ctx.managerToken,
+      body: { fullName: 'Чужая база' },
+    });
+    assert.equal(foreignEdit.status, 403);
+
+    const coordinatorDenied = await api('PATCH', `/api/org/employees/${ctx.employeeCard.id}/manager`, {
+      token: ctx.coordinatorToken,
+      body: { managerId: ctx.managerEmployee.id },
+    });
+    assert.equal(coordinatorDenied.status, 403);
+
+    const assigned = await api('PATCH', `/api/org/employees/${ctx.employeeCard.id}/manager`, {
+      token: ctx.managerToken,
+      body: { managerId: ctx.managerEmployee.id },
+    });
+    assert.equal(assigned.status, 200, JSON.stringify(assigned.body));
+    assert.equal(
+      (await prisma.employeeAssignment.findUniqueOrThrow({ where: { activeEmployeeId: ctx.employeeCard.id } })).managerId,
+      ctx.managerEmployee.id,
+    );
+  });
+
+  it('создаёт, переименовывает и архивирует куст в пределах базы менеджера', async () => {
+    const ctx = await setup();
+    const mine = await api('POST', `/api/org/bases/${ctx.baseId}/mines`, {
+      token: ctx.managerToken,
+      body: { name: 'Месторождение с кустами' },
+    });
+    assert.equal(mine.status, 201);
+    assert.equal(mine.body.code, undefined);
+
+    const created = await api('POST', `/api/org/mines/${mine.body.id}/pads`, {
+      token: ctx.managerToken,
+      body: { name: 'Куст 12' },
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+
+    const renamed = await api('PATCH', `/api/org/mines/${mine.body.id}/pads/${created.body.id}`, {
+      token: ctx.managerToken,
+      body: { name: 'Куст 12А' },
+    });
+    assert.equal(renamed.status, 200);
+    assert.equal(renamed.body.name, 'Куст 12А');
+
+    const archived = await api('PATCH', `/api/org/mines/${mine.body.id}/pads/${created.body.id}`, {
+      token: ctx.managerToken,
+      body: { isActive: false },
+    });
+    assert.equal(archived.status, 200);
+    assert.equal(archived.body.isActive, false);
+
+    const listed = await api('GET', `/api/org/mines/${mine.body.id}/pads`, { token: ctx.managerToken });
+    assert.equal(listed.status, 200);
+    assert.equal(listed.body.some((pad: { id: number; isActive: boolean }) => pad.id === created.body.id && pad.isActive === false), true);
+
+    const coordinator = await api('POST', `/api/org/mines/${mine.body.id}/coordinator`, {
+      token: ctx.managerToken,
+      body: { coordinatorEmployeeId: ctx.coordinatorEmployee.id, startsAt: iso() },
+    });
+    assert.equal(coordinator.status, 201, JSON.stringify(coordinator.body));
+    const otherMine = await api('POST', `/api/org/bases/${ctx.baseId}/mines`, {
+      token: ctx.managerToken,
+      body: { name: 'Чужое месторождение координатора' },
+    });
+    const denied = await api('GET', `/api/org/mines/${otherMine.body.id}/pads`, { token: ctx.coordinatorToken });
+    assert.equal(denied.status, 403);
+    const allowed = await api('GET', `/api/org/mines/${mine.body.id}/pads`, { token: ctx.coordinatorToken });
+    assert.equal(allowed.status, 200);
+  });
+
+  it('архивирует договор без удаления и скрывает его из активного списка', async () => {
+    const ctx = await setup();
+    const customer = await api('POST', '/api/org/customers', {
+      token: ctx.adminToken,
+      body: { name: 'Заказчик архива', code: 'ARCH-CUSTOMER' },
+    });
+    const activeStatus = await prisma.contractStatus.findUniqueOrThrow({ where: { code: 'ACTIVE' } });
+    const archivedStatus = await prisma.contractStatus.findUniqueOrThrow({ where: { code: 'ARCHIVED' } });
+    const contract = await api('POST', `/api/org/bases/${ctx.baseId}/contracts`, {
+      token: ctx.managerToken,
+      body: { customerId: customer.body.id, statusId: activeStatus.id, number: 'ARCH-001', startsAt: iso(-10), endsAt: iso(10) },
+    });
+    assert.equal(contract.status, 201, JSON.stringify(contract.body));
+
+    const rejected = await api('POST', `/api/org/bases/${ctx.baseId}/contracts`, {
+      token: ctx.managerToken,
+      body: { customerId: customer.body.id, statusId: archivedStatus.id, number: 'ARCH-002', startsAt: iso(-10), endsAt: iso(10) },
+    });
+    assert.equal(rejected.status, 400);
+
+    const mine = await api('POST', `/api/org/bases/${ctx.baseId}/mines`, {
+      token: ctx.managerToken,
+      body: { name: 'Месторождение архива' },
+    });
+    const well = await api('POST', `/api/org/mines/${mine.body.id}/wells`, { token: ctx.managerToken, body: { name: 'Скважина архива' } });
+    const workType = await prisma.workType.findFirstOrThrow();
+    const planned = await prisma.workStatus.findUniqueOrThrow({ where: { code: 'PLANNED' } });
+    await prisma.workExecution.create({
+      data: {
+        wellId: well.body.id,
+        workTypeId: workType.id,
+        contractId: contract.body.id,
+        statusId: planned.id,
+        performedAt: new Date(`${iso()}T00:00:00.000Z`),
+        createdById: ctx.manager.id,
+      },
+    });
+
+    const archived = await api('POST', `/api/org/contracts/${contract.body.id}/archive`, { token: ctx.managerToken });
+    assert.equal(archived.status, 200, JSON.stringify(archived.body));
+    assert.equal(archived.body.status.code, 'ARCHIVED');
+    assert.equal(archived.body.hadOpenWork, true);
+    assert.equal(await prisma.contract.count({ where: { id: contract.body.id } }), 1);
+    assert.equal(await prisma.workExecution.count({ where: { contractId: contract.body.id } }), 1);
+
+    const activeList = await api('GET', `/api/org/bases/${ctx.baseId}/contracts`, { token: ctx.managerToken });
+    assert.equal(activeList.body.some((item: { id: number }) => item.id === contract.body.id), false);
+    const archivedList = await api('GET', `/api/org/bases/${ctx.baseId}/contracts?includeArchived=true`, { token: ctx.managerToken });
+    assert.equal(archivedList.body.some((item: { id: number }) => item.id === contract.body.id), true);
+
+    const employeeArchive = await api('POST', `/api/org/contracts/${contract.body.id}/archive`, { token: await tokenFor(ctx.employee.login) });
+    assert.equal(employeeArchive.status, 403);
+  });
+});

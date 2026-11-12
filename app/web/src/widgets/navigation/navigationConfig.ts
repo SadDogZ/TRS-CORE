@@ -78,33 +78,67 @@ const USER_NAV_GROUPS: NavGroup[] = [
   ] },
   { label: 'Общие разделы', icon: 'grid', items: ROOT_USER_ITEMS },
 ];
-const LEAD_NAV_GROUPS: NavGroup[] = [
-  ...USER_NAV_GROUPS,
-  { label: 'Моя команда', icon: 'people', items: [
-    { to: '/admin/dashboard', label: 'Сводка команды', icon: 'dashboard' },
-    { to: '/admin/overview', label: 'Удостоверения команды', icon: 'overview' },
-    { to: '/admin/credentials', label: 'Записи удостоверений', icon: 'badge' },
-    ...SCHEDULE_LEAD_ITEMS,
-  ] },
+const LEAD_PEOPLE_ITEMS: NavItem[] = [
+  { to: '/admin/overview', label: 'Удостоверения команды', icon: 'overview' },
+  { to: '/admin/credentials', label: 'Записи удостоверений', icon: 'badge' },
 ];
 const CREDENTIAL_LEAD_NAV_GROUPS: NavGroup[] = [
-  ...USER_NAV_GROUPS,
-  { label: 'Моя команда', icon: 'people', items: [
-    { to: '/admin/credentials', label: 'Записи удостоверений', icon: 'badge' },
-    ...SCHEDULE_LEAD_ITEMS,
-  ] },
+  { label: 'Моя организация', icon: 'people', to: '/admin/organization' },
+  { label: 'Записи удостоверений', icon: 'badge', to: '/admin/credentials' },
+  { label: 'Общие разделы', icon: 'grid', items: [{ to: '/settings', label: 'Настройки', icon: 'settings' }] },
 ];
 
 export function resolveNavGroups(user: UserDto, language: Language): NavGroup[] {
-  const isLead = user.systemRoles.some((role) => ['MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC'].includes(role));
-  const isCredentialLead = user.systemRoles.some((role) => ['MECHANIC', 'SHOP_FOREMAN'].includes(role));
-  const groups: NavGroup[] = user.systemRoles.includes('ADMIN') ? ADMIN_NAV_GROUPS
-    : isLead ? (user.systemRoles.includes('COORDINATOR')
-      ? LEAD_NAV_GROUPS.map((group) => group.items?.some((item) => item.to === '/admin/dashboard')
-        ? { ...group, items: [...group.items, { to: '/admin/customer-site-works', label: 'Работы заказчика', icon: 'work' }] }
-        : group)
-      : LEAD_NAV_GROUPS)
-    : isCredentialLead ? CREDENTIAL_LEAD_NAV_GROUPS : USER_NAV_GROUPS;
+  const roles = user.systemRoles;
+  const has = (role: string) => roles.includes(role as (typeof roles)[number]);
+  const isManager = has('MANAGER');
+  const isCoordinator = has('COORDINATOR');
+  const isSeniorMechanic = has('SENIOR_MECHANIC');
+  const isLead = isManager || isCoordinator || isSeniorMechanic;
+  const isCredentialLead = has('MECHANIC') || has('SHOP_FOREMAN');
+
+  let groups: NavGroup[];
+  if (has('ADMIN')) {
+    groups = ADMIN_NAV_GROUPS;
+  } else if (isLead) {
+    const teamItems: NavItem[] = [...LEAD_PEOPLE_ITEMS];
+    if (isManager) {
+      teamItems.push({ to: '/admin/org/personnel', label: 'Персонал', icon: 'people' });
+    }
+    if (isManager || isCoordinator) {
+      teamItems.push(...SCHEDULE_LEAD_ITEMS);
+    }
+    if (isCoordinator && !isManager) {
+      teamItems.push({ to: '/admin/org/personnel', label: 'Персонал', icon: 'people' });
+    }
+    if (isCoordinator) {
+      teamItems.push({ to: '/admin/customer-site-works', label: 'Работы заказчика', icon: 'work' });
+    }
+
+    const orgItems: NavItem[] = [{ to: '/admin/organization', label: 'Месторождения и скважины', icon: 'grid' }];
+    if (isManager || isCoordinator) {
+      orgItems.push({ to: '/admin/planned-work', label: 'План работ', icon: 'work' });
+    }
+    if (isManager) {
+      orgItems.push(
+        { to: '/admin/org/assignments', label: 'Назначения и переводы', icon: 'doneAll' },
+        { to: '/admin/org/contracts', label: 'Договоры', icon: 'book' },
+        { to: '/admin/work-execution', label: 'Выполнение работ', icon: 'doneAll' },
+      );
+    }
+
+    groups = [
+      { label: 'Панель управления', icon: 'dashboard', to: '/admin/dashboard' },
+      { label: 'Моя организация', icon: 'people', items: orgItems },
+      { label: 'Моя команда', icon: 'people', items: teamItems },
+      { label: 'Общие разделы', icon: 'grid', items: [{ to: '/settings', label: 'Настройки', icon: 'settings' }] },
+    ];
+  } else if (isCredentialLead) {
+    groups = CREDENTIAL_LEAD_NAV_GROUPS;
+  } else {
+    groups = USER_NAV_GROUPS;
+  }
+
   const localizeItem = (item: NavItem): NavItem => ({ ...item, label: translateSourceText(item.label, language) });
   return groups.map((group) => ({
     ...group,

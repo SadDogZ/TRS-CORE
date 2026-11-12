@@ -21,7 +21,8 @@ export async function dependencies(req: Request, res: Response) { res.json(await
 export async function unlock(req: Request, res: Response) { res.json(await users.unlock(currentUser(req), idParam(req))); }
 export async function restore(req: Request, res: Response) { res.json(await users.restore(currentUser(req), idParam(req))); }
 
-export async function getOne(req: Request, res: Response) {
+
+export async function getOne(req: Request, res: Response) {
   const id = idParam(req);
   const [user, credentials] = await Promise.all([users.getById(id), adminListForUser(id)]);
   res.json({ user, credentials });
@@ -37,6 +38,23 @@ export async function createPersonnel(req: Request, res: Response) {
 
 export async function update(req: Request, res: Response) {
   res.json(await users.update(currentUser(req), idParam(req), req.body));
+}
+
+// ---------- Scoped personnel (manager/coordinator within their own base/team) ----------
+
+export async function getScopedAccount(req: Request, res: Response) {
+  const employeeId = idParam(req, 'employeeId');
+  const user = await users.getByEmployeeId(currentUser(req), employeeId);
+  const credentials = await adminListForUser(user.id);
+  res.json({ user, credentials });
+}
+
+export async function updateScopedAccount(req: Request, res: Response) {
+  res.json(await users.updateByEmployeeId(currentUser(req), idParam(req, 'employeeId'), req.body));
+}
+
+export async function createPersonnelScoped(req: Request, res: Response) {
+  res.status(201).json(await users.createPersonnelScoped(currentUser(req), req.body));
 }
 
 export async function remove(req: Request, res: Response) {

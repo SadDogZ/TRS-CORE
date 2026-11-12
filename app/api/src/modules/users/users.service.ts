@@ -19,7 +19,7 @@ import { ensureUserCredentials } from '../credentials/credentials.service.ts';
 import { daysBetween } from '@app/shared';
 import { statusWhere, visibleCredentialWhere } from '../credentials/filters.ts';
 import { getDateContext } from '../../core/settings.ts';
-import { assignEmployeeInTransaction, ensureEmployeeAndLegacyRole, updateEmployeePosition } from '../organization/organization.service.ts';
+import { assignEmployeeInTransaction, assertEmployeeBaseAssignable, assertManageableEmployee, ensureEmployeeAndLegacyRole, updateEmployeePosition } from '../organization/organization.service.ts';
 import type { AssignmentInput, PersonnelCreateInput } from '../organization/schemas.ts';
 
 const PROFILE_FIELDS = ['fullName', 'positionId', 'phone', 'email', 'isActive'] as const;
@@ -68,7 +68,8 @@ export async function list(query: ListQuery): Promise<Paginated<UserListItemDto>
     },
   });
   const filterWhere: Record<NonNullable<ListQuery['filter']>, Prisma.UserWhereInput> = {
-    all: {},    hasRed: hasStatus('RED'),
+    all: {},
+    hasRed: hasStatus('RED'),
     hasYellow: hasStatus('YELLOW'),
     hasWhite: hasStatus('WHITE'),
   };
@@ -165,6 +166,24 @@ export async function getById(id: number) {
   return toUserDto(await findActiveUser(id));
 }
 
+/** Карточка сотрудника для менеджера/координатора в рамках их зоны ответственности (не ADMIN-only). */
+export async function getByEmployeeId(actor: User, employeeId: number) {
+  const employee = await assertManageableEmployee(actor, employeeId);
+  return getById(employee.userId);
+}
+
+/** Редактирование карточки сотрудника в рамках зоны ответственности менеджера/координатора. */
+export async function updateByEmployeeId(actor: User, employeeId: number, input: UpdateUserRequest) {
+  const employee = await assertManageableEmployee(actor, employeeId);
+  return update(actor, employee.userId, input);
+}
+
+/** Создание сотрудника менеджером: база назначения должна входить в зону ответственности менеджера. */
+export async function createPersonnelScoped(actor: User, input: PersonnelCreateInput) {
+  await assertEmployeeBaseAssignable(actor, input.assignment.baseId ?? null);
+  return createUser(actor, input.user, input.assignment);
+}
+
 // ---------- Изменение ----------
 
 async function createUser(actor: User, input: CreateUserRequest, assignment?: AssignmentInput) {
@@ -178,7 +197,8 @@ async function createUser(actor: User, input: CreateUserRequest, assignment?: As
       data: {
         fullName: input.fullName,
         login: input.login,
-        passwordHash,        positionId: input.positionId,
+        passwordHash,
+        positionId: input.positionId,
         phone: input.phone ?? null,
         email: input.email ?? null,
         mustChangePassword: true,

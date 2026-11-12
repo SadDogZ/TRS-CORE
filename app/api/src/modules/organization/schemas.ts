@@ -33,9 +33,24 @@ export type BaseUpdateInput = Infer<typeof baseUpdateSchema>;
 
 export const mineSchema = object({
   name: text({ max: 150 }),
-  code: optionalText(50),
 });
 export type MineInput = Infer<typeof mineSchema>;
+
+export const padSchema = object({
+  name: text({ max: 150 }),
+});
+export type PadInput = Infer<typeof padSchema>;
+
+export const padUpdateSchema = object({
+  name: optional(text({ max: 150 })),
+  isActive: optional(bool()),
+});
+export type PadUpdateInput = Infer<typeof padUpdateSchema>;
+
+export const employeeManagerSchema = object({
+  managerId: int({ min: 1 }),
+});
+export type EmployeeManagerInput = Infer<typeof employeeManagerSchema>;
 
 export const wellSchema = object({
   name: text({ max: 150 }),
@@ -56,6 +71,7 @@ export const assignmentSchema = object({
   baseId: optionalId(),
   positionId: optionalId(),
   supervisorEmployeeId: optionalId(),
+  managerId: optionalId(),
   startsAt: matches(
     (v): v is string => typeof v === 'string' && isIsoDate(v),
     'Укажите дату в формате ГГГГ-ММ-ДД',
@@ -135,15 +151,48 @@ const dateValue = matches(
 export const customerSchema = object({
   name: text({ max: 200 }),
   code: optionalText(50),
+  address: optionalText(300),
+  comments: optionalText(10000),
 });
 export type CustomerInput = Infer<typeof customerSchema>;
 
 export const customerUpdateSchema = object({
   name: text({ max: 200 }),
   code: optionalText(50),
+  address: optionalText(300),
+  comments: optionalText(10000),
   isActive: optional(bool()),
 });
 export type CustomerUpdateInput = Infer<typeof customerUpdateSchema>;
+
+export const customerRepresentativeSchema = object({
+  fullName: text({ max: 200 }),
+  phone: optionalText(50),
+  email: optionalText(150),
+  relationship: optionalText(200),
+  comments: optionalText(10000),
+});
+export type CustomerRepresentativeInput = Infer<typeof customerRepresentativeSchema>;
+
+export const customerObjectSchema = object({
+  name: text({ max: 200 }),
+  relationship: text({ max: 200 }),
+  contractId: optionalId(),
+  comments: optionalText(10000),
+  status: text({ max: 50 }),
+  isActive: optional(bool()),
+});
+export type CustomerObjectInput = Infer<typeof customerObjectSchema>;
+
+export const customerObjectCoordinatorAssignmentSchema = object({
+  coordinatorEmployeeId: int({ min: 1 }),
+  startsAt: matches(
+    (v): v is string => typeof v === 'string' && isIsoDate(v),
+    'Укажите дату в формате ГГГГ-ММ-ДД',
+  ),
+  comment: optionalText(2000),
+});
+export type CustomerObjectCoordinatorAssignmentInput = Infer<typeof customerObjectCoordinatorAssignmentSchema>;
 
 export const contractSchema = object(
   {

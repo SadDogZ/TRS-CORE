@@ -1,4 +1,4 @@
-export type PersonnelSortKey = 'name' | 'login' | 'track' | 'position' | 'base' | 'roles';
+export type PersonnelSortKey = 'name' | 'login' | 'track' | 'position' | 'base' | 'manager' | 'roles';
 export type PersonnelSortDirection = 'asc' | 'desc';
 
 export interface PersonnelRow {
@@ -14,6 +14,7 @@ export interface PersonnelRow {
     baseId: number | null;
     track: 'TRS' | 'R_AND_M' | 'UNASSIGNED';
     position: { name: string } | null;
+    manager?: { user: { fullName: string } } | null;
   }[];
 }
 
@@ -33,6 +34,7 @@ function rowSearchText(row: PersonnelRow, baseNames: Map<number, string>) {
     row.user.email ?? '',
     track,
     assignment?.position?.name ?? '',
+    assignment?.manager?.user.fullName ?? '',
     base,
     roles,
     String(row.id),
@@ -47,6 +49,7 @@ function sortValue(row: PersonnelRow, key: PersonnelSortKey, baseNames: Map<numb
     case 'track': return assignment?.track === 'R_AND_M' ? 'Цеховой' : assignment?.track === 'TRS' ? 'Полевой' : 'Не назначен';
     case 'position': return assignment?.position?.name ?? null;
     case 'base': return assignment?.baseId === null || assignment?.baseId === undefined ? null : baseNames.get(assignment.baseId) ?? null;
+    case 'manager': return assignment?.manager?.user.fullName ?? null;
     case 'roles': return row.user.systemRoles.map((grant) => grant.systemRole.code).join(', ');
   }
 }

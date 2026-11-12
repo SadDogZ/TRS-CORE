@@ -25,6 +25,7 @@ import { AnnualSchedulePage } from './modules/schedule/AnnualSchedulePage.tsx';
 import { ShiftPartnersPage } from './modules/schedule/ShiftPartnersPage.tsx';
 import { OrganizationPage } from './modules/organization/OrganizationPage.tsx';
 import { WorkExecutionPage } from './modules/organization/WorkExecutionPage.tsx';
+import { CustomerDirectoryPage } from './modules/organization/CustomerDirectoryPage.tsx';
 import { BaseCatalogPage } from './modules/organization/BaseCatalogPage.tsx';
 import { ReferenceDataPage } from './modules/organization/ReferenceDataPage.tsx';
 import { SettingsPage } from './modules/settings/SettingsPage.tsx';
@@ -42,12 +43,12 @@ interface Route {
 const ROUTES: Route[] = [
   { path: '/admin/dashboard', systemRoles: ['ADMIN', 'MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC'] ,render: () => <AdminDashboardPage /> },
   { path: '/admin/overview', systemRoles: ['ADMIN', 'MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC'] ,render: () => <OverviewPage /> },
-  { path: '/admin/org/personnel', systemRoles: ['ADMIN', 'MANAGER'] ,render: () => <PersonnelPage /> },
+  { path: '/admin/org/personnel', systemRoles: ['ADMIN', 'MANAGER', 'COORDINATOR'] ,render: () => <PersonnelPage /> },
   { path: '/admin/org/assignments', systemRoles: ['ADMIN', 'MANAGER'] ,render: () => <OrganizationPage key="assignments" view="assignments" /> },
   { path: '/admin/org/transfers', systemRoles: ['ADMIN', 'MANAGER'] ,render: () => <OrganizationPage key="transfers" view="transfers" /> },
   { path: '/admin/planned-work', systemRoles: ['ADMIN', 'MANAGER', 'COORDINATOR'] ,render: () => <PlannedWorkSchedulePage /> },
   { path: '/admin/customer-site-works', systemRoles: ['ADMIN', 'COORDINATOR', 'MANAGER'] ,render: () => <CustomerSiteWorksPage /> },
-  { path: '/admin/org/contracts', systemRoles: ['ADMIN', 'MANAGER'] ,render: () => <WorkExecutionPage /> },
+  { path: '/admin/org/contracts', systemRoles: ['ADMIN', 'MANAGER'] ,render: () => <CustomerDirectoryPage /> },
   { path: '/admin/work-schedule', systemRoles: ['ADMIN'],render: () => <AnnualSchedulePage /> },
   { path: '/admin/work-schedule/calendar', systemRoles: ['ADMIN', ] ,render: () => <WorkSchedulePage admin /> },
   { path: '/admin/team-work-schedule', systemRoles: ['ADMIN', 'MANAGER', 'COORDINATOR'] ,render: () => <AnnualSchedulePage team /> },
@@ -57,6 +58,7 @@ const ROUTES: Route[] = [
   { path: '/admin/ifo', systemRoles: ['ADMIN', ] ,render: () => <IfoPage /> },
   { path: '/admin/work-execution', systemRoles: ['ADMIN', 'MANAGER'] ,render: () => <WorkExecutionPage /> },
   { path: '/admin/organization', systemRoles: ['ADMIN', 'MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC', 'MECHANIC', 'SHOP_FOREMAN'] ,render: () => <OrganizationPage key="structure" view="structure" /> },
+  { path: '/admin/users', systemRoles: ['ADMIN'] ,render: () => <UsersPage /> },
   { path: '/admin/dictionaries/bases', systemRoles: ['ADMIN', ] ,render: () => <BaseCatalogPage /> },
   { path: '/admin/dictionaries/organization', systemRoles: ['ADMIN', ] ,render: () => <ReferenceDataPage /> },
   { path: '/admin/users/:id', systemRoles: ['ADMIN', ] ,render: (p) => <UserDetailPage key={p.id} id={Number(p.id)} /> },
@@ -66,17 +68,17 @@ const ROUTES: Route[] = [
   { path: '/admin/messages', systemRoles: ['ADMIN', ] ,render: () => <MessagesPage /> },
   { path: '/admin/notifications', systemRoles: ['ADMIN', ] ,render: () => <NotificationsPage /> },
   { path: '/admin/audit-log', systemRoles: ['ADMIN', ] ,render: () => <AuditLogPage /> },
-  { path: '/user/work-schedule', systemRoles: ['EMPLOYEE'], render: () => <WorkSchedulePage /> },
-  { path: '/user/work-schedule/calendar', systemRoles: ['EMPLOYEE'], render: () => <WorkSchedulePage /> },
-  { path: '/user/radar-cards', systemRoles: ['EMPLOYEE'], render: () => <RadarCardsPage /> },
-  { path: '/user/ifo', systemRoles: ['EMPLOYEE'], render: () => <IfoPage /> },
-  { path: '/user/dashboard', systemRoles: ['EMPLOYEE'], render: () => <UserDashboardPage /> },
-  { path: '/user/organization', systemRoles: ['EMPLOYEE'], render: () => <OrganizationPage /> },
-  { path: '/user/work-execution', systemRoles: ['EMPLOYEE'], render: () => <WorkExecutionPage /> },
-  { path: '/user/planned-work', systemRoles: ['EMPLOYEE'], render: () => <PlannedWorkSchedulePage /> },
-  { path: '/user/credentials', systemRoles: ['EMPLOYEE'], render: () => <UserCredentialsPage /> },
-  { path: '/user/notifications', systemRoles: ['EMPLOYEE'], render: () => <NotificationsPage /> },
-  { path: '/user/profile', systemRoles: ['EMPLOYEE'], render: () => <ProfilePage /> },
+  { path: '/user/work-schedule', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <WorkSchedulePage /> },
+  { path: '/user/work-schedule/calendar', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <WorkSchedulePage /> },
+  { path: '/user/radar-cards', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <RadarCardsPage /> },
+  { path: '/user/ifo', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <IfoPage /> },
+  { path: '/user/dashboard', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <UserDashboardPage /> },
+  { path: '/user/organization', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <OrganizationPage /> },
+  { path: '/user/work-execution', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <WorkExecutionPage /> },
+  { path: '/user/planned-work', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <PlannedWorkSchedulePage /> },
+  { path: '/user/credentials', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <UserCredentialsPage /> },
+  { path: '/user/notifications', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <NotificationsPage /> },
+  { path: '/user/profile', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <ProfilePage /> },
   { path: '/settings', render: () => <SettingsPage /> },
 ];
 
