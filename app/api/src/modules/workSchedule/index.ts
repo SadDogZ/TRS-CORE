@@ -1,56 +1,99 @@
 import { Router } from 'express';
-import { countScheduleDaysByStatus, groupScheduleDays, schedulePeriodSchema, scheduleTemplateSchema, shiftPartnersSchema, workScheduleIntervalDeleteSchema, workScheduleIntervalSchema, workScheduleQuerySchema, workScheduleUpdateSchema, WORK_DAY_STATUSES, type SchedulePeriodRequest, type ScheduleTemplateRequest, type ShiftPartnersRequest } from '@app/shared';
+import { groupScheduleDays, schedulePeriodSchema, scheduleTemplateSchema, shiftPartnersSchema, workScheduleIntervalDeleteSchema, workScheduleIntervalSchema, workScheduleQuerySchema, workScheduleUpdateSchema, WORK_DAY_STATUSES, type SchedulePeriodRequest, type ScheduleTemplateRequest, type ShiftPartnersRequest } from '@app/shared';
 import { currentUser } from '../../core/auth.ts';
 import { asyncHandler as h } from '../../core/asyncHandler.ts';
-import { adminOnly, signedIn, type AppModule } from '../../core/module.ts';
+import { adminOnly, deprecateTo, signedIn, type AppModule } from '../../core/module.ts';
 import { idParam, validQuery, validate } from '../../core/validate.ts';
 import { prisma } from '../../core/db.ts';
 import { badRequest } from '../../core/errors.ts';
-import { deleteScheduleRange, getAnnualScheduleIntervals, getScheduleIntervals, intervalDto, replaceScheduleRanges, setScheduleRange, yearBounds } from './schedule.service.ts';
+import { deleteScheduleRange, getScheduleIntervals, intervalDto, replaceScheduleRanges, setScheduleRange } from './schedule.service.ts';
+import { assertCanEditSchedule, assertCanReadSchedule, scheduleUsers, visibleScheduleUserIds } from './scheduleAccess.ts';
+import { loadAnnualDaily, loadAnnualIntervals, loadDailySchedule, loadIntervalSchedule } from './scheduleQueries.ts';
 
+const deprecateSchedule = deprecateTo('/api/me/work-schedule');
 const toDate = (s: string) => new Date(`${s}T00:00:00.000Z`);
 const toIsoDate = (d: Date) => d.toISOString().slice(0, 10);
 const dateFields = (row: any) => ({ ...row, cycleStart: toIsoDate(row.cycleStart), validFrom: toIsoDate(row.validFrom), validTo: row.validTo ? toIsoDate(row.validTo) : null, startDate: row.startDate ? toIsoDate(row.startDate) : undefined, endDate: row.endDate ? toIsoDate(row.endDate) : undefined });
 
 const dto = (row: any) => ({ id: row.id, userId: row.userId, date: row.date.toISOString().slice(0, 10), status: row.status });
-async function getSchedule(userId: number, year: number) {
-  const entries = await prisma.workScheduleEntry.findMany({ where: { userId, date: { gte: new Date(Date.UTC(year, 0, 1)), lt: new Date(Date.UTC(year + 1, 0, 1)) } }, orderBy: { date: 'asc' } });
-  const stats = Object.fromEntries(WORK_DAY_STATUSES.map((status) => [status, entries.filter((e) => e.status === status).length]));
-  return { userId, year, entries: entries.map(dto), stats };
-}
-async function getIntervalSchedule(userId: number, year: number) {
-  const bounds = yearBounds(year);
-  const intervals = (await getScheduleIntervals(userId, bounds.startDate, bounds.endDate)).map(intervalDto);
-  return { userId, year, intervals, stats: countScheduleDaysByStatus(intervals, bounds.startDate, bounds.endDate) };
-}
 function assertYear(year: number) {
   if (!Number.isInteger(year) || year < 2020 || year > 2100) throw badRequest('Invalid schedule year');
 }
-const own = Router(); own.use(...signedIn);
-own.get('/', validate(workScheduleQuerySchema, 'query'), h(async (req, res) => { const q = validQuery<{ year?: number }>(req); res.json(await getSchedule(currentUser(req).id, q.year ?? new Date().getFullYear())); }));
-own.get('/intervals', validate(workScheduleQuerySchema, 'query'), h(async (req, res) => { const q = validQuery<{ year?: number }>(req); res.json(await getIntervalSchedule(currentUser(req).id, q.year ?? new Date().getFullYear())); }));
-const admin = Router(); admin.use(...adminOnly);
-admin.get('/', validate(workScheduleQuerySchema, 'query'), h(async (req, res) => { const q = validQuery<{ userId?: number; year?: number }>(req); if (!q.userId) throw badRequest('Выберите сотрудника'); res.json(await getSchedule(q.userId, q.year ?? new Date().getFullYear())); }));
-admin.get('/intervals', validate(workScheduleQuerySchema, 'query'), h(async (req, res) => { const q = validQuery<{ userId?: number; year?: number }>(req); if (!q.userId) throw badRequest('Выберите сотрудника'); res.json(await getIntervalSchedule(q.userId, q.year ?? new Date().getFullYear())); }));
-admin.get('/users', h(async (_req, res) => res.json(await prisma.user.findMany({ where: { isDeleted: false, isActive: true }, select: { id: true, fullName: true, login: true }, orderBy: { fullName: 'asc' } }))));
-admin.get('/annual', h(async (req, res) => {
-  const year = Number(req.query.year) || new Date().getFullYear();
-  const users = await prisma.user.findMany({ where: { isDeleted: false, isActive: true }, select: { id: true, fullName: true }, orderBy: { fullName: 'asc' } });
-  const entries = await prisma.workScheduleEntry.findMany({ where: { date: { gte: new Date(Date.UTC(year, 0, 1)), lt: new Date(Date.UTC(year + 1, 0, 1)) } }, orderBy: { date: 'asc' } });
-  const byUser = new Map<number, any[]>();
-  for (const entry of entries) byUser.set(entry.userId, [...(byUser.get(entry.userId) ?? []), dto(entry)]);
-  res.json({ year, rows: users.map((user) => ({ user, entries: byUser.get(user.id) ?? [] })) });
-}));
-admin.get('/annual/intervals', h(async (req, res) => {
+const yearOf = (value: unknown) => (typeof value === 'number' ? value : new Date().getFullYear());
+
+/** Workspace schedule: the caller sees and edits only their authorized scope. */
+const own = Router();
+own.use(...signedIn);
+own.get('/users', h(async (req, res) => res.json(await scheduleUsers(await visibleScheduleUserIds(currentUser(req))))));
+own.get('/annual', h(async (req, res) => {
   const year = Number(req.query.year) || new Date().getFullYear();
   assertYear(year);
-  const bounds = yearBounds(year);
-  const users = await prisma.user.findMany({ where: { isDeleted: false, isActive: true }, select: { id: true, fullName: true }, orderBy: { fullName: 'asc' } });
-  const userIds = users.map(({ id }) => id);
-  const intervals = (await getAnnualScheduleIntervals(userIds, bounds.startDate, bounds.endDate)).map(intervalDto);
-  const byUser = new Map<number, typeof intervals>();
-  for (const interval of intervals) byUser.set(interval.userId, [...(byUser.get(interval.userId) ?? []), interval]);
-  res.json({ year, rows: users.map((user) => ({ user, intervals: byUser.get(user.id) ?? [] })) });
+  res.json(await loadAnnualDaily(await visibleScheduleUserIds(currentUser(req)), year));
+}));
+own.get('/annual/intervals', h(async (req, res) => {
+  const year = Number(req.query.year) || new Date().getFullYear();
+  assertYear(year);
+  res.json(await loadAnnualIntervals(await visibleScheduleUserIds(currentUser(req)), year));
+}));
+own.get('/', validate(workScheduleQuerySchema, 'query'), h(async (req, res) => {
+  const actor = currentUser(req);
+  const query = validQuery<{ userId?: number; year?: number }>(req);
+  const userId = query.userId ?? actor.id;
+  await assertCanReadSchedule(actor, userId);
+  res.json(await loadDailySchedule(userId, yearOf(query.year)));
+}));
+own.get('/intervals', validate(workScheduleQuerySchema, 'query'), h(async (req, res) => {
+  const actor = currentUser(req);
+  const query = validQuery<{ userId?: number; year?: number }>(req);
+  const userId = query.userId ?? actor.id;
+  await assertCanReadSchedule(actor, userId);
+  res.json(await loadIntervalSchedule(userId, yearOf(query.year)));
+}));
+own.put('/intervals/:userId', validate(workScheduleIntervalSchema), h(async (req, res) => {
+  const actor = currentUser(req);
+  const userId = idParam(req, 'userId');
+  await assertCanEditSchedule(actor, userId);
+  await setScheduleRange(userId, { ...req.body, userId });
+  const intervals = await getScheduleIntervals(userId, req.body.startDate, req.body.endDate);
+  res.json(intervals.map(intervalDto));
+}));
+own.delete('/intervals/:userId', validate(workScheduleIntervalDeleteSchema, 'query'), h(async (req, res) => {
+  const actor = currentUser(req);
+  const userId = idParam(req, 'userId');
+  await assertCanEditSchedule(actor, userId);
+  const query = validQuery<{ startDate: string; endDate: string }>(req);
+  await deleteScheduleRange(userId, query.startDate, query.endDate);
+  res.status(204).end();
+}));
+own.put('/:userId/:date', validate(workScheduleUpdateSchema), h(async (req, res) => {
+  const actor = currentUser(req);
+  const userId = idParam(req, 'userId');
+  await assertCanEditSchedule(actor, userId);
+  const input = req.body;
+  await setScheduleRange(userId, { userId, startDate: input.date, endDate: input.date, status: input.status });
+  const row = await prisma.workScheduleEntry.findUniqueOrThrow({ where: { userId_date: { userId, date: toDate(input.date) } } });
+  res.json(dto(row));
+}));
+own.delete('/:userId/:date', h(async (req, res) => {
+  const actor = currentUser(req);
+  const userId = idParam(req, 'userId');
+  await assertCanEditSchedule(actor, userId);
+  await deleteScheduleRange(userId, req.params.date, req.params.date);
+  res.status(204).end();
+}));
+const admin = Router(); admin.use(...adminOnly);
+admin.get('/', deprecateSchedule, validate(workScheduleQuerySchema, 'query'), h(async (req, res) => { const q = validQuery<{ userId?: number; year?: number }>(req); if (!q.userId) throw badRequest('Выберите сотрудника'); res.json(await loadDailySchedule(q.userId, yearOf(q.year))); }));
+admin.get('/intervals', deprecateSchedule, validate(workScheduleQuerySchema, 'query'), h(async (req, res) => { const q = validQuery<{ userId?: number; year?: number }>(req); if (!q.userId) throw badRequest('Выберите сотрудника'); res.json(await loadIntervalSchedule(q.userId, yearOf(q.year))); }));
+admin.get('/users', deprecateSchedule, h(async (_req, res) => res.json(await scheduleUsers(null))));
+admin.get('/annual', deprecateSchedule, h(async (req, res) => {
+  const year = Number(req.query.year) || new Date().getFullYear();
+  assertYear(year);
+  res.json(await loadAnnualDaily(null, year));
+}));
+admin.get('/annual/intervals', deprecateSchedule, h(async (req, res) => {
+  const year = Number(req.query.year) || new Date().getFullYear();
+  assertYear(year);
+  res.json(await loadAnnualIntervals(null, year));
 }));
 admin.post('/shift-partners/generate', validate(shiftPartnersSchema), h(async (req, res) => {
   const input = req.body as ShiftPartnersRequest;
@@ -90,18 +133,18 @@ admin.post('/templates', validate(scheduleTemplateSchema), h(async (req, res) =>
 admin.get('/periods', h(async (_req, res) => res.json((await prisma.schedulePeriod.findMany({ include: { user: { select: { id: true, fullName: true } } }, orderBy: { startDate: 'desc' } })).map(dateFields))));
 admin.post('/periods', validate(schedulePeriodSchema), h(async (req, res) => { const input = req.body as SchedulePeriodRequest; if (input.endDate < input.startDate) throw badRequest('End date cannot be earlier than start date'); const row = await prisma.schedulePeriod.create({ data: { ...input, startDate: toDate(input.startDate), endDate: toDate(input.endDate) }, include: { user: { select: { id: true, fullName: true } } } }); res.status(201).json(dateFields(row)); }));
 
-admin.put('/intervals/:userId', validate(workScheduleIntervalSchema), h(async (req, res) => {
+admin.put('/intervals/:userId', deprecateSchedule, validate(workScheduleIntervalSchema), h(async (req, res) => {
   const userId = idParam(req, 'userId');
   await setScheduleRange(userId, { ...req.body, userId });
   const intervals = await getScheduleIntervals(userId, req.body.startDate, req.body.endDate);
   res.json(intervals.map(intervalDto));
 }));
-admin.delete('/intervals/:userId', validate(workScheduleIntervalDeleteSchema, 'query'), h(async (req, res) => {
+admin.delete('/intervals/:userId', deprecateSchedule, validate(workScheduleIntervalDeleteSchema, 'query'), h(async (req, res) => {
   const userId = idParam(req, 'userId');
   const query = validQuery<{ startDate: string; endDate: string }>(req);
   await deleteScheduleRange(userId, query.startDate, query.endDate);
   res.status(204).end();
 }));
-admin.delete('/:userId/:date', h(async (req, res) => { const userId = idParam(req, 'userId'); await deleteScheduleRange(userId, req.params.date, req.params.date); res.status(204).end(); }));
-admin.put('/:userId/:date', validate(workScheduleUpdateSchema), h(async (req, res) => { const userId = idParam(req, 'userId'); const input = req.body; await setScheduleRange(userId, { userId, startDate: input.date, endDate: input.date, status: input.status }); const row = await prisma.workScheduleEntry.findUniqueOrThrow({ where: { userId_date: { userId, date: toDate(input.date) } } }); res.json(dto(row)); }));
+admin.delete('/:userId/:date', deprecateSchedule, h(async (req, res) => { const userId = idParam(req, 'userId'); await deleteScheduleRange(userId, req.params.date, req.params.date); res.status(204).end(); }));
+admin.put('/:userId/:date', deprecateSchedule, validate(workScheduleUpdateSchema), h(async (req, res) => { const userId = idParam(req, 'userId'); const input = req.body; await setScheduleRange(userId, { userId, startDate: input.date, endDate: input.date, status: input.status }); const row = await prisma.workScheduleEntry.findUniqueOrThrow({ where: { userId_date: { userId, date: toDate(input.date) } } }); res.json(dto(row)); }));
 export const workScheduleModule: AppModule = { name: 'work-schedule', routes: [{ path: '/api/me/work-schedule', router: own }, { path: '/api/admin/work-schedule', router: admin }] };

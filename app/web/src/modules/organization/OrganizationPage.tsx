@@ -74,7 +74,7 @@ export function OrganizationPage({ view = 'overview' }: { view?: OrganizationVie
   const [errorMessageText, setErrorMessageText] = useState('');
 
   const basesQuery = useQuery('org:bases', () => api.get<Base[]>('/org/bases'));
-  const employeesQuery = useQuery('org:employees', () => api.get<Employee[]>('/org/employees'));
+  const employeesQuery = useQuery('org:employees', () => api.get<Employee[]>('/me/personnel'));
   const positionsQuery = useQuery('org:positions', () => api.get<Position[]>('/org/positions'));
   const rolesQuery = useQuery('org:roles', () => api.get<SystemRole[]>(isAdmin ? '/admin/org/roles' : '/org/roles'));
   const bases = basesQuery.data ?? [];

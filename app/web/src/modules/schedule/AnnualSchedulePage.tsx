@@ -18,7 +18,7 @@ export function AnnualSchedulePage({ team = false }: { team?: boolean }) {
   const scrollHost = useRef<HTMLDivElement>(null);
   const scrollBar = useRef<HTMLDivElement>(null);
   const scrollTrack = useRef<HTMLDivElement>(null);
-  const schedulePath = team ? '/team/work-schedule/annual/intervals' : '/admin/work-schedule/annual/intervals';
+  const schedulePath = '/me/work-schedule/annual/intervals';
   const { data, error } = useQuery(`schedule:annual:${team}:${year}`, () =>
     api.get<WorkScheduleAnnualIntervalsDto>(schedulePath, { year }),
   );

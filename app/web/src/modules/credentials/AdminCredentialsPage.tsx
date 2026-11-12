@@ -31,7 +31,7 @@ export function AdminCredentialsPage() {
   const status: StatusFilter = CREDENTIAL_STATUSES.includes(rawStatus as CredentialStatus) ? (rawStatus as CredentialStatus) : 'ALL';
 
   const catalog = useQuery('admin:catalog:active', () => api.get<CatalogItemDto[]>('/admin/catalog'));
-  const dashboard = useQuery('admin:dashboard', () => api.get<DashboardDto>('/admin/dashboard'));
+  const dashboard = useQuery('admin:dashboard', () => api.get<DashboardDto>('/me/dashboard'));
   const { data, error } = useQuery(`admin:credentials:${q}:${status}:${credentialId}:${marked}:${page}:${pageSize}`, () =>
     api.get<Paginated<UserCredentialDto>>('/admin/credentials', {
       q,

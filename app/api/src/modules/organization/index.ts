@@ -2,16 +2,18 @@ import { Router } from 'express';
 import express from 'express';
 import { PHOTO_MAX_BYTES, updateUserSchema } from '@app/shared';
 import { accountRolesSchema, addendumSchema, assignmentSchema, baseSchema, baseUpdateSchema, bulkWellContractBasisSchema, contractPermissionSchema, contractSchema, contractUpdateSchema, customerObjectCoordinatorAssignmentSchema, customerObjectSchema, customerRepresentativeSchema, customerSchema, customerUpdateSchema, employeeManagerSchema, employeeProfileSchema, mineCoordinatorSchema, mineSchema, padSchema, padUpdateSchema, personnelCreateSchema, statusCatalogSchema, statusCatalogUpdateSchema, wellContractBasisSchema, wellSchema, workAuthorizationSchema, workExecutionSchema, workTypeSchema, workTypeUpdateSchema } from './schemas.ts';
-import { adminOnly, signedIn, type AppModule } from '../../core/module.ts';
+import { adminOnly, deprecateTo, signedIn, type AppModule } from '../../core/module.ts';
 import { asyncHandler as h } from '../../core/asyncHandler.ts';
 import { validate } from '../../core/validate.ts';
 import * as controller from './organization.controller.ts';
 import * as usersController from '../users/users.controller.ts';
 
+const deprecatePersonnel = deprecateTo('/api/me/personnel');
+
 const organization = Router();
 organization.use(...signedIn);
 organization.get('/bases', h(controller.listBases));
-organization.get('/employees', h(controller.listEmployees));
+organization.get('/employees', deprecatePersonnel, h(controller.listEmployees));
 organization.get('/mines', h(controller.listMines));
 organization.get('/mines/:mineId/wells', h(controller.listWells));
 organization.get('/mines/:mineId/pads', h(controller.listPads));
@@ -62,7 +64,7 @@ organization.post('/work', validate(workExecutionSchema), h(controller.recordWor
 const admin = Router();
 admin.use(...adminOnly);
 admin.get('/roles', h(controller.listRoles));
-admin.get('/employees', h(controller.listEmployees));
+admin.get('/employees', deprecatePersonnel, h(controller.listEmployees));
 admin.post('/bases', validate(baseSchema), h(controller.createBase));
 admin.patch('/bases/:baseId', validate(baseUpdateSchema), h(controller.updateBase));
 admin.get('/customers', h(controller.listAdminCustomers));

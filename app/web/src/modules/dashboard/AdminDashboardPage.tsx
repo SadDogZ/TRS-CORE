@@ -18,7 +18,7 @@ export function AdminDashboardPage() {
   const currentUser = useCurrentUser();
   const { language, t } = useLanguage();
   const m = (key: keyof typeof APP_MESSAGES.ru, values?: Record<string, string | number>) => appMessage(language, key, values);
-  const { data, error } = useQuery('admin:dashboard', () => api.get<DashboardDto>('/admin/dashboard'));
+  const { data, error } = useQuery('admin:dashboard', () => api.get<DashboardDto>('/me/dashboard'));
   const isAdmin = currentUser.systemRoles.includes('ADMIN');
   const usersDirectoryPath = isAdmin ? '/admin/users' : '/admin/org/personnel';
   const criticalListPath = isAdmin ? '/admin/users?filter=hasRed' : '/admin/credentials?status=RED';

@@ -127,4 +127,36 @@ describe('interval work schedule API', () => {
     const annualEmployee = annual.body.rows.find((row: { user: { id: number } }) => row.user.id === employeeA.id);
     assert.ok(annualEmployee.intervals.every((row: { startDate: string; endDate: string }) => row.startDate <= '2024-12-31' && row.endDate >= '2024-01-01'));
   });
+
+  it('scopes /api/me/work-schedule to the caller and keeps the admin alias', async () => {
+    const admin = await createUser('ADMIN');
+    const employee = await createUser('EMPLOYEE');
+    const other = await createUser('EMPLOYEE');
+    const adminToken = await tokenFor(admin.login);
+    const employeeToken = await tokenFor(employee.login);
+    await api('PUT', `/api/me/work-schedule/intervals/${employee.id}`, {
+      token: adminToken,
+      body: { startDate: '2024-05-01', endDate: '2024-05-03', status: 'WORK' },
+    });
+
+    const own = await api('GET', '/api/me/work-schedule/intervals?year=2024', { token: employeeToken });
+    assert.equal(own.status, 200);
+    assert.equal(own.body.userId, employee.id);
+
+    const users = await api('GET', '/api/me/work-schedule/users', { token: employeeToken });
+    assert.equal(users.status, 200);
+    assert.deepEqual(users.body.map((row: { id: number }) => row.id), [employee.id]);
+
+    const denied = await api('GET', `/api/me/work-schedule/intervals?userId=${other.id}&year=2024`, { token: employeeToken });
+    assert.equal(denied.status, 403);
+    const writeDenied = await api('PUT', `/api/me/work-schedule/intervals/${other.id}`, {
+      token: employeeToken,
+      body: { startDate: '2024-05-01', endDate: '2024-05-01', status: 'FREE_SHIFT' },
+    });
+    assert.equal(writeDenied.status, 403);
+
+    const alias = await api('GET', `/api/admin/work-schedule/intervals?userId=${employee.id}&year=2024`, { token: adminToken });
+    assert.equal(alias.status, 200);
+    assert.equal(alias.body.userId, employee.id);
+  });
 });

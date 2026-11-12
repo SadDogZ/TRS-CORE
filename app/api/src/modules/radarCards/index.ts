@@ -3,7 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { radarCardListQuerySchema, radarCardSchema, type Paginated, type RadarCardDto, type RadarCardRequest } from '@app/shared';
 import { currentUser, isAdministrator } from '../../core/auth.ts';
 import { asyncHandler as h } from '../../core/asyncHandler.ts';
-import { signedIn, type AppModule } from '../../core/module.ts';
+import { deprecatedAlias, signedIn, type AppModule } from '../../core/module.ts';
 import { idParam, validQuery, validate } from '../../core/validate.ts';
 import { prisma } from '../../core/db.ts';
 import { badRequest, notFound } from '../../core/errors.ts';
@@ -86,4 +86,11 @@ shared.delete('/:id', h(async (req, res) => {
   await prisma.radarCard.delete({ where: { id } });
   res.status(204).end();
 }));
-export const radarCardsModule: AppModule = { name: 'radar-cards', routes: [{ path: '/api/radar-cards', router: shared }, { path: '/api/admin/radar-cards', router: shared }] };
+export const radarCardsModule: AppModule = {
+  name: 'radar-cards',
+  routes: [
+    { path: '/api/me/radar-cards', router: shared },
+    { path: '/api/radar-cards', router: deprecatedAlias('/api/me/radar-cards', shared) },
+    { path: '/api/admin/radar-cards', router: deprecatedAlias('/api/me/radar-cards', shared) },
+  ],
+};

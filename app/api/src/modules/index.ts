@@ -16,4 +16,5 @@ import { organizationModule } from './organization/index.ts';
 import { customerSiteWorkModule } from './organization/customerSiteWork.routes.ts';
 import { teamWorkScheduleModule } from './workSchedule/team.ts';
 import { plannedWorkModule } from './plannedWork/index.ts';
-export const modules: AppModule[] = [authModule, usersModule, credentialsModule, catalogModule, positionsModule, notificationsModule, messagesModule, dashboardModule, overviewModule, auditModule, radarCardsModule, ifoModule, workScheduleModule, organizationModule, customerSiteWorkModule, teamWorkScheduleModule, plannedWorkModule];
+import { workspaceModule } from './workspace/index.ts';
+export const modules: AppModule[] = [authModule, usersModule, credentialsModule, catalogModule, positionsModule, notificationsModule, messagesModule, dashboardModule, overviewModule, auditModule, radarCardsModule, ifoModule, workScheduleModule, organizationModule, customerSiteWorkModule, teamWorkScheduleModule, plannedWorkModule, workspaceModule];

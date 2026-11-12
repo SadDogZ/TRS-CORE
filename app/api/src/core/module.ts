@@ -1,4 +1,4 @@
-import type { RequestHandler, Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import { authenticate, requirePasswordChanged, requireSystemRole } from './auth.ts';
 
 /**
@@ -17,3 +17,22 @@ export const adminOnly: RequestHandler[] = [authenticate, requirePasswordChanged
 
 /** Любой вошедший пользователь, сменивший временный пароль. */
 export const signedIn: RequestHandler[] = [authenticate, requirePasswordChanged];
+
+/** Обёртка устаревшего префикса: те же обработчики плюс Deprecation и Link на канонический путь. */
+export function deprecatedAlias(successorPath: string, router: Router): Router {
+  const alias = Router();
+  alias.use((_req, res, next) => {
+    res.setHeader('Deprecation', 'true');
+    res.setHeader('Link', `<${successorPath}>; rel="successor-version"`);
+    next();
+  });
+  alias.use(router);
+  return alias;
+}
+
+/** Заголовок Deprecation для маршрута, у которого есть преемник в `/api/me`. */
+export const deprecateTo = (successorPath: string): RequestHandler => (_req, res, next) => {
+  res.setHeader('Deprecation', 'true');
+  res.setHeader('Link', `<${successorPath}>; rel="successor-version"`);
+  next();
+};

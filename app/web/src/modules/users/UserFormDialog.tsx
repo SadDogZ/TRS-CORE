@@ -44,7 +44,7 @@ export function UserFormDialog({ open, mode, user, employeeId, personnel = false
   const { reset } = form;
   const positions = useQuery(open ? (personnel ? 'org:positions' : 'admin:positions:all') : null, () => api.get<PositionDto[]>(personnel ? '/org/positions' : '/admin/positions', personnel ? undefined : { archived: true }));
   const bases = useQuery(open && personnel ? 'org:bases' : null, () => api.get<Base[]>('/org/bases'));
-  const employees = useQuery(open && personnel ? 'org:employees' : null, () => api.get<EmployeeOption[]>('/org/employees'));
+  const employees = useQuery(open && personnel ? 'org:employees' : null, () => api.get<EmployeeOption[]>('/me/personnel'));
   const [track, setTrack] = useState<Track>(assignment?.track === 'R_AND_M' ? 'R_AND_M' : 'TRS');
   const [baseId, setBaseId] = useState(assignment?.baseId ? String(assignment.baseId) : '');
   const [supervisorId, setSupervisorId] = useState(assignment?.supervisorEmployeeId ? String(assignment.supervisorEmployeeId) : '');

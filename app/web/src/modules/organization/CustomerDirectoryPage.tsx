@@ -119,7 +119,7 @@ export function CustomerDirectoryPage() {
 
   const directory = useQuery(`org:customers:directory:${search.trim().toLowerCase()}`, () => api.get<DirectoryRow[]>('/org/customers/directory', { search }));
   const details = useQuery(detailsId ? `org:customers:details:${detailsId}` : null, () => api.get<CustomerDetails>(`/org/customers/${detailsId}/details`));
-  const employees = useQuery(coordDialog.open ? 'org:customers:employees' : null, () => api.get<EmployeeOption[]>('/org/employees'));
+  const employees = useQuery(coordDialog.open ? 'org:customers:employees' : null, () => api.get<EmployeeOption[]>('/me/personnel'));
   const bases = useQuery(contractDialogOpen ? 'org:customers:bases' : null, () => api.get<BaseOption[]>('/org/bases'));
   const contractStatuses = useQuery(contractDialogOpen ? 'org:customers:contract-statuses' : null, () => api.get<ContractStatusOption[]>('/org/statuses/contract'));
 

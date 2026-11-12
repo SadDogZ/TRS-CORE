@@ -19,7 +19,7 @@ export function PersonnelPage() {
   const canManage = user.systemRoles.includes('ADMIN') || user.systemRoles.includes('MANAGER');
   const basesQuery = useQuery('org:bases', () => api.get<Base[]>('/org/bases'));
   const positionsQuery = useQuery('org:personnel:positions', () => api.get<PositionDto[]>('/org/positions'));
-  const employeesQuery = useQuery('org:employees', () => api.get<Employee[]>('/org/employees'));
+  const employeesQuery = useQuery('org:employees', () => api.get<Employee[]>('/me/personnel'));
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<{ key: PersonnelSortKey; direction: PersonnelSortDirection }>({ key: 'name', direction: 'asc' });
   const [dialogOpen, setDialogOpen] = useState(false);

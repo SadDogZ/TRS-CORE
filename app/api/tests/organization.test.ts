@@ -878,6 +878,17 @@ describe('team work schedule access', () => {
     assert.equal((await api('DELETE', '/api/team/work-schedule/' + outsider.id + '/' + date, { token: ctx.coordinatorToken })).status, 403);
     assert.equal((await api('DELETE', '/api/team/work-schedule/intervals/' + outsider.id + '?startDate=' + date + '&endDate=' + intervalDate, { token: ctx.coordinatorToken })).status, 403);
     assert.equal((await api('GET', '/api/team/work-schedule/users', { token: await tokenFor(ctx.employee.login) })).status, 403);
+
+    const meUsers = await api('GET', '/api/me/work-schedule/users', { token: ctx.coordinatorToken });
+    assert.equal(meUsers.status, 200);
+    assert.deepEqual(meUsers.body.map((row: { id: number }) => row.id).sort(), [ctx.coordinator.id, ctx.employee.id].sort());
+    const meEmployeeUsers = await api('GET', '/api/me/work-schedule/users', { token: await tokenFor(ctx.employee.login) });
+    assert.equal(meEmployeeUsers.status, 200);
+    assert.deepEqual(meEmployeeUsers.body.map((row: { id: number }) => row.id), [ctx.employee.id]);
+    assert.equal((await api('GET', `/api/me/work-schedule/intervals?userId=${outsider.id}&year=${Number(date.slice(0, 4))}`, { token: ctx.coordinatorToken })).status, 403);
+    assert.equal((await api('PUT', `/api/me/work-schedule/intervals/${outsider.id}`, { token: ctx.managerToken, body: { startDate: date, endDate: intervalDate, status: 'VACATION' } })).status, 403);
+    const meAllowed = await api('GET', `/api/me/work-schedule/intervals?userId=${ctx.employee.id}&year=${Number(date.slice(0, 4))}`, { token: ctx.coordinatorToken });
+    assert.equal(meAllowed.status, 200);
   });
 });
 
@@ -998,11 +1009,12 @@ describe('персонал менеджера, кусты и архив дого
       data: { baseId: ctx.otherBaseId, track: 'TRS' },
     });
 
-    const visible = await api('GET', '/api/org/employees', { token: ctx.managerToken });
+    const visible = await api('GET', '/api/me/personnel', { token: ctx.managerToken });
     assert.equal(visible.status, 200);
     const visibleIds = visible.body.map((row: { id: number }) => row.id);
     assert.ok(visibleIds.includes(ctx.employeeCard.id));
     assert.equal(visibleIds.includes(outsiderCard.id), false);
+    assert.equal((await api('GET', '/api/me/personnel', { token: await tokenFor(ctx.employee.login) })).status, 403);
 
     const positions = await api('GET', '/api/org/positions', { token: ctx.managerToken });
     assert.equal(positions.status, 200);
@@ -1099,6 +1111,18 @@ describe('персонал менеджера, кусты и архив дого
       body: { customerId: customer.body.id, statusId: activeStatus.id, number: 'ARCH-001', startsAt: iso(-10), endsAt: iso(10) },
     });
     assert.equal(contract.status, 201, JSON.stringify(contract.body));
+    const foreignCustomer = await api('POST', '/api/org/customers', {
+      token: ctx.adminToken,
+      body: { name: 'Заказчик другой базы', code: 'ARCH-OTHER' },
+    });
+    const foreign = await api('POST', `/api/org/bases/${ctx.otherBaseId}/contracts`, {
+      token: ctx.adminToken,
+      body: { customerId: foreignCustomer.body.id, statusId: activeStatus.id, number: 'ARCH-FOREIGN', startsAt: iso(-10), endsAt: iso(10) },
+    });
+    assert.equal(foreign.status, 201, JSON.stringify(foreign.body));
+    const scoped = await api('GET', '/api/me/contracts', { token: ctx.managerToken });
+    assert.equal(scoped.body.some((item: { id: number }) => item.id === contract.body.id), true);
+    assert.equal(scoped.body.some((item: { id: number }) => item.id === foreign.body.id), false);
 
     const rejected = await api('POST', `/api/org/bases/${ctx.baseId}/contracts`, {
       token: ctx.managerToken,
@@ -1131,8 +1155,11 @@ describe('персонал менеджера, кусты и архив дого
     assert.equal(await prisma.contract.count({ where: { id: contract.body.id } }), 1);
     assert.equal(await prisma.workExecution.count({ where: { contractId: contract.body.id } }), 1);
 
-    const activeList = await api('GET', `/api/org/bases/${ctx.baseId}/contracts`, { token: ctx.managerToken });
+    const activeList = await api('GET', '/api/me/contracts', { token: ctx.managerToken });
     assert.equal(activeList.body.some((item: { id: number }) => item.id === contract.body.id), false);
+    const employeeContracts = await api('GET', '/api/me/contracts', { token: await tokenFor(ctx.employee.login) });
+    assert.equal(employeeContracts.status, 200);
+    assert.deepEqual(employeeContracts.body, []);
     const archivedList = await api('GET', `/api/org/bases/${ctx.baseId}/contracts?includeArchived=true`, { token: ctx.managerToken });
     assert.equal(archivedList.body.some((item: { id: number }) => item.id === contract.body.id), true);
 

@@ -24,7 +24,7 @@ export function WorkSchedulePage({ admin = false, team = false }: { admin?: bool
 
   const save = useAction(async () => {
     if (!draft) return;
-    const root = `${team ? '/team' : '/admin'}/work-schedule`;
+    const root = '/me/work-schedule';
     for (const range of groupScheduleDates([...deleted])) {
       await api.delete(`${root}/intervals/${selectedUser}`, range);
     }
@@ -43,8 +43,8 @@ export function WorkSchedulePage({ admin = false, team = false }: { admin?: bool
     invalidate('schedule');
   });
   const canEdit = admin || team;
-  const users = useQuery(canEdit ? `schedule:users:${team}` : null, () => api.get<UserDto[]>(team ? '/team/work-schedule/users' : '/admin/work-schedule/users'));
-  const path = team ? '/team/work-schedule' : admin ? '/admin/work-schedule' : '/me/work-schedule';
+  const users = useQuery(canEdit ? 'schedule:users' : null, () => api.get<UserDto[]>('/me/work-schedule/users'));
+  const path = '/me/work-schedule';
   const { data, error } = useQuery(`schedule:${admin}:${team}:${selectedUser}:${year}`, () =>
     api.get<WorkScheduleIntervalsDto>(`${path}/intervals`, { userId: selectedUser, year }),
   );

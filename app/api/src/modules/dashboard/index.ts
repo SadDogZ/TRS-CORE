@@ -1,12 +1,13 @@
 import { Router, type Request, type Response } from 'express';
 import { currentUser, requireSystemRole } from '../../core/auth.ts';
 import { asyncHandler as h } from '../../core/asyncHandler.ts';
-import { signedIn, type AppModule } from '../../core/module.ts';
+import { deprecateTo, signedIn, type AppModule } from '../../core/module.ts';
 import { getDashboard } from './dashboard.service.ts';
 
 /** Дашборд администратора: счётчики по статусам, ближайшие истечения, последние изменения. */
 const router = Router();
 router.use(...signedIn, requireSystemRole('ADMIN', 'MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC'));
+router.use(deprecateTo('/api/me/dashboard'));
 router.get(
   '/',
   h(async (req: Request, res: Response) => {

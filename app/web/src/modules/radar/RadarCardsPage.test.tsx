@@ -35,9 +35,9 @@ function setup(items: typeof card[] = []) {
     uiSettings: {}, createdAt: '2026-01-01T00:00:00.000Z',
   });
   vi.mocked(api.get).mockImplementation(async (path: string) => {
-    if (path === '/radar-cards') return { items, total: items.length, page: 1, pageSize: 20 } as never;
-    if (path === '/radar-cards/users') return [] as never;
-    if (path === '/radar-cards/customers') return [{ id: 3, name: 'Заказчик из справочника' }] as never;
+    if (path === '/me/radar-cards') return { items, total: items.length, page: 1, pageSize: 20 } as never;
+    if (path === '/me/radar-cards/users') return [] as never;
+    if (path === '/me/radar-cards/customers') return [{ id: 3, name: 'Заказчик из справочника' }] as never;
     throw new Error(`Unexpected GET ${path}`);
   });
   vi.mocked(api.patch).mockResolvedValue({} as never);
@@ -70,7 +70,7 @@ describe('RadarCardsPage customer directory', () => {
     fireEvent.change(customer, { target: { value: '3' } });
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
-    await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/radar-cards/21', expect.objectContaining({
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/me/radar-cards/21', expect.objectContaining({
       customerId: 3,
       customerName: 'Старое название',
     })));

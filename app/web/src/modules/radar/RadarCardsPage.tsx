@@ -47,8 +47,8 @@ function RadarForm({ item, open, onClose }: { item?: RadarCardDto; open: boolean
         stoppedWork: item.stoppedWork,
       }
     : empty(me.id));
-  const users = useQuery(open ? 'radar:users' : null, () => api.get<UserDto[]>('/radar-cards/users'));
-  const customers = useQuery(open ? 'radar:customers' : null, () => api.get<Customer[]>('/radar-cards/customers'));
+  const users = useQuery(open ? 'radar:users' : null, () => api.get<UserDto[]>('/me/radar-cards/users'));
+  const customers = useQuery(open ? 'radar:customers' : null, () => api.get<Customer[]>('/me/radar-cards/customers'));
   const selectedCustomer = customers.data?.find((customer) => String(customer.id) === values.customerId);
   const set = <K extends keyof RadarFormValues>(key: K, value: RadarFormValues[K]) => setValues((current) => ({ ...current, [key]: value }));
   const save = useAction(
@@ -59,7 +59,7 @@ function RadarForm({ item, open, onClose }: { item?: RadarCardDto; open: boolean
         customerName: item ? values.customerName : selectedCustomer?.name ?? '',
         userId: Number(values.userId),
       };
-      return item ? api.patch(`/radar-cards/${item.id}`, body) : api.post('/radar-cards', body);
+      return item ? api.patch(`/me/radar-cards/${item.id}`, body) : api.post('/me/radar-cards', body);
     },
     { onSuccess: () => { invalidate('radar'); onClose(); } },
   );
@@ -103,8 +103,8 @@ export function RadarCardsPage() {
   const [mode, setMode] = useState<'cards' | 'table'>('cards');
   const [form, setForm] = useState<{ open: boolean; item?: RadarCardDto }>({ open: false });
   const [removeId, setRemoveId] = useState<number | null>(null);
-  const { data, error } = useQuery(`radar:${from}:${to}:${previousMonth}:${page}`, () => api.get<Paginated<RadarCardDto>>('/radar-cards', { from, to, previousMonth, page, pageSize: 20 }));
-  const remove = useAction((id: number) => api.delete(`/radar-cards/${id}`), { onSuccess: () => { invalidate('radar'); setRemoveId(null); } });
+  const { data, error } = useQuery(`radar:${from}:${to}:${previousMonth}:${page}`, () => api.get<Paginated<RadarCardDto>>('/me/radar-cards', { from, to, previousMonth, page, pageSize: 20 }));
+  const remove = useAction((id: number) => api.delete(`/me/radar-cards/${id}`), { onSuccess: () => { invalidate('radar'); setRemoveId(null); } });
   const canEdit = (item: RadarCardDto) => item.userId === me.id;
   const customerName = (item: RadarCardDto) => item.customer?.name ?? item.customerName;
 

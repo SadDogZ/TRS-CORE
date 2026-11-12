@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { ifoProposalSchema, type IfoProposalDto, type IfoProposalRequest, type Paginated } from '@app/shared';
 import { currentUser, isAdministrator } from '../../core/auth.ts';
 import { asyncHandler as h } from '../../core/asyncHandler.ts';
-import { signedIn, type AppModule } from '../../core/module.ts';
+import { deprecatedAlias, signedIn, type AppModule } from '../../core/module.ts';
 import { prisma } from '../../core/db.ts';
 import { idParam, validate } from '../../core/validate.ts';
 import { notFound } from '../../core/errors.ts';
@@ -14,4 +14,10 @@ router.get('/', h(async (req, res) => { const actor = currentUser(req); const pa
 router.post('/', validate(ifoProposalSchema), h(async (req, res) => { const row = await prisma.ifoProposal.create({ data: { ...(req.body as IfoProposalRequest), proposerId: currentUser(req).id }, include: { proposer: { select: proposerSelect } } }); res.status(201).json(toDto(row)); }));
 router.patch('/:id', validate(ifoProposalSchema), h(async (req, res) => { const actor = currentUser(req); const id = idParam(req); const existing = await prisma.ifoProposal.findUnique({ where: { id } }); if (!existing || (!(await isAdministrator(actor)) && existing.proposerId !== actor.id)) throw notFound('You can only edit your own IFO proposals'); const row = await prisma.ifoProposal.update({ where: { id }, data: req.body, include: { proposer: { select: proposerSelect } } }); res.json(toDto(row)); }));
 router.delete('/:id', h(async (req, res) => { const actor = currentUser(req); const id = idParam(req); const existing = await prisma.ifoProposal.findUnique({ where: { id } }); if (!existing || (!(await isAdministrator(actor)) && existing.proposerId !== actor.id)) throw notFound('IFO proposal not found'); await prisma.ifoProposal.delete({ where: { id } }); res.status(204).end(); }));
-export const ifoModule: AppModule = { name: 'ifo', routes: [{ path: '/api/ifo', router }] };
+export const ifoModule: AppModule = {
+  name: 'ifo',
+  routes: [
+    { path: '/api/me/ifo', router },
+    { path: '/api/ifo', router: deprecatedAlias('/api/me/ifo', router) },
+  ],
+};

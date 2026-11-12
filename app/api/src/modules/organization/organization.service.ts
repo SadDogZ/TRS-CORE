@@ -488,6 +488,20 @@ export async function listCustomerSiteWorksForWell(actor: User, wellId: number) 
   }));
 }
 
+/** Договоры рабочей области: администратор видит все базы, менеджер — свою, остальные — пустой список. */
+export async function listWorkspaceContracts(actor: User, includeArchived = false) {
+  const roles = await roleCodes(prisma, actor.id);
+  const baseId = isAdministrator(actor, roles) ? null : roles.includes('MANAGER') ? await actorBase(prisma, actor) : -1;
+  return prisma.contract.findMany({
+    where: {
+      ...(baseId === null ? {} : { baseId: baseId ?? -1 }),
+      ...(includeArchived ? {} : { status: { code: { not: 'ARCHIVED' } } }),
+    },
+    include: { customer: true, base: true, status: true, addenda: { include: { status: true } } },
+    orderBy: [{ startsAt: 'desc' }, { number: 'asc' }],
+  });
+}
+
 export async function listContracts(actor: User, baseId: number, includeArchived = false) {
   await assertBaseAccess(prisma, actor, baseId);
   return prisma.contract.findMany({

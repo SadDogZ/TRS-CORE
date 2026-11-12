@@ -14,7 +14,7 @@ export function OverviewPage() {
   const { language, t } = useLanguage();
   const m = (key: keyof typeof APP_MESSAGES.ru) => appMessage(language, key);
   const positions = useQuery('admin:positions:active', () => api.get<PositionDto[]>('/admin/positions'));
-  const { data, error, loading } = useQuery(`admin:overview:${query}:${positionId}`, () => api.get<OverviewDto>('/admin/overview', { q: query, positionId }));
+  const { data, error, loading } = useQuery(`admin:overview:${query}:${positionId}`, () => api.get<OverviewDto>('/me/overview', { q: query, positionId }));
   const rows = (data?.rows ?? []).filter((row) => !onlyAttention || Object.values(row.cells).some((cell) => !cell.marked && (cell.status === 'RED' || cell.status === 'YELLOW')));
   return <>
     <PageHeader title={m('generalInfo')} subtitle={m('credentialsDeadlineTable')} />

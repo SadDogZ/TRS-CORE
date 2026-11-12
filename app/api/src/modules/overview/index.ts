@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { overviewQuerySchema } from '@app/shared';
 import { asyncHandler as h } from '../../core/asyncHandler.ts';
-import { signedIn, type AppModule } from '../../core/module.ts';
+import { deprecateTo, signedIn, type AppModule } from '../../core/module.ts';
 import { currentUser, requireSystemRole } from '../../core/auth.ts';
 import { validQuery, validate } from '../../core/validate.ts';
 import { getOverview } from './overview.service.ts';
@@ -9,6 +9,7 @@ import { getOverview } from './overview.service.ts';
 /** «Общие сведения»: сотрудники × удостоверения со сроками. */
 const router = Router();
 router.use(...signedIn, requireSystemRole('ADMIN', 'MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC'));
+router.use(deprecateTo('/api/me/overview'));
 router.get(
   '/',
   validate(overviewQuerySchema, 'query'),
