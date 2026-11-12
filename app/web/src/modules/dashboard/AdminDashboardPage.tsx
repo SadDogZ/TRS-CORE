@@ -20,18 +20,18 @@ export function AdminDashboardPage() {
   const m = (key: keyof typeof APP_MESSAGES.ru, values?: Record<string, string | number>) => appMessage(language, key, values);
   const { data, error } = useQuery('admin:dashboard', () => api.get<DashboardDto>('/me/dashboard'));
   const isAdmin = currentUser.systemRoles.includes('ADMIN');
-  const usersDirectoryPath = isAdmin ? '/admin/users' : '/admin/org/personnel';
-  const criticalListPath = isAdmin ? '/admin/users?filter=hasRed' : '/admin/credentials?status=RED';
+  const usersDirectoryPath = isAdmin ? '/admin/users' : '/me/personnel';
+  const criticalListPath = isAdmin ? '/admin/users?filter=hasRed' : '/me/team-credentials?status=RED';
 
   return <>
     <PageHeader title={m('dashboardTitle')} subtitle={m('dashboardSubtitle')} />
     {error && <Alert>{error}</Alert>}
     <div className="stats">
       <button type="button" className="stat" onClick={() => navigate(usersDirectoryPath)}><div className="stat-label"><Icon name="people" className="c-blue" />{m('allEmployees')}</div><div className="stat-value">{data?.totalUsers ?? '—'}</div></button>
-      {CREDENTIAL_STATUSES.map((status) => <button key={status} type="button" className={`stat ${status}`} onClick={() => navigate(`/admin/credentials?status=${status}`)}><div className="stat-label"><StatusIcon status={status} />{t(STATUS_MESSAGE_KEYS[status])}</div><div className={`stat-value ${status === 'WHITE' ? '' : `c-${status}`}`}>{data?.counts[status] ?? '—'}</div></button>)}
+      {CREDENTIAL_STATUSES.map((status) => <button key={status} type="button" className={`stat ${status}`} onClick={() => navigate(`/me/team-credentials?status=${status}`)}><div className="stat-label"><StatusIcon status={status} />{t(STATUS_MESSAGE_KEYS[status])}</div><div className={`stat-value ${status === 'WHITE' ? '' : `c-${status}`}`}>{data?.counts[status] ?? '—'}</div></button>)}
     </div>
     <div className="two-cols">
-      <Section title={m('upcomingExpiries')} link={{ to: '/admin/credentials?status=RED', label: m('allCritical') }}>
+      <Section title={m('upcomingExpiries')} link={{ to: '/me/team-credentials?status=RED', label: m('allCritical') }}>
         {data?.upcoming.length === 0 ? <div className="empty">{m('noUpcoming')}</div> : <div className="table-wrap"><table className="table"><thead><tr><th>{m('employee')}</th><th>{m('credential')}</th><th>{m('due')}</th><th>{m('status')}</th></tr></thead><tbody>{data?.upcoming.map((credential) => <tr key={credential.id}><td>{isAdmin ? <Link to={`/admin/users/${credential.userId}`}>{credential.user?.fullName}</Link> : <span>{credential.user?.fullName}</span>}</td><td>{credential.name}</td><td className="nowrap">{formatDateRu(credential.expiryDate)}</td><td><StatusBadge status={credential.status} daysLeft={credential.daysLeft} label={t(STATUS_MESSAGE_KEYS[credential.status])} daysText={daysLeftText(credential.daysLeft, language)} /></td></tr>)}</tbody></table></div>}
       </Section>
       <div className="stack">

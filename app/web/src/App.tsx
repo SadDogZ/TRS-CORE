@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { SystemRoleCode } from '@app/shared';
-import { Protected, homePath, useAuth } from './core/auth.tsx';
+import { Protected, homePath, useAuth, useCurrentUser } from './core/auth.tsx';
 import { Layout } from './Layout.tsx';
 import { Redirect, matchPath, useRouter } from './core/router.tsx';
 import { LoginPage } from './modules/auth/LoginPage.tsx';
@@ -35,56 +35,110 @@ import { PlannedWorkSchedulePage } from './modules/organization/PlannedWorkSched
 
 interface Route {
   path: string;
-  
   systemRoles?: SystemRoleCode[];
   render: (params: Record<string, string>) => ReactNode;
 }
 
+const LEAD: SystemRoleCode[] = ['ADMIN', 'MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC'];
+const SCHEDULE_EDITOR: SystemRoleCode[] = ['ADMIN', 'MANAGER', 'COORDINATOR'];
+const WORKSPACE: SystemRoleCode[] = [
+  'ADMIN', 'MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC', 'MECHANIC', 'SHOP_FOREMAN', 'EMPLOYEE', 'SHOP_EMPLOYEE',
+];
+
+function MeDashboard() {
+  const user = useCurrentUser();
+  return user.systemRoles.some((role) => LEAD.includes(role)) ? <AdminDashboardPage /> : <UserDashboardPage />;
+}
+
+function MeWorkScheduleTable() {
+  const user = useCurrentUser();
+  return user.systemRoles.some((role) => SCHEDULE_EDITOR.includes(role)) ? <AnnualSchedulePage /> : <WorkSchedulePage />;
+}
+
+function MeOrganization() {
+  const user = useCurrentUser();
+  const leadStructure = user.systemRoles.some((role) =>
+    ['ADMIN', 'MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC', 'MECHANIC', 'SHOP_FOREMAN'].includes(role),
+  );
+  return leadStructure
+    ? <OrganizationPage key="structure" view="structure" />
+    : <OrganizationPage key="overview" />;
+}
+
+/** Рабочая область текущего пользователя. `/admin/*` остаётся только для администрирования системы. */
 const ROUTES: Route[] = [
-  { path: '/admin/dashboard', systemRoles: ['ADMIN', 'MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC'] ,render: () => <AdminDashboardPage /> },
-  { path: '/admin/overview', systemRoles: ['ADMIN', 'MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC'] ,render: () => <OverviewPage /> },
-  { path: '/admin/org/personnel', systemRoles: ['ADMIN', 'MANAGER', 'COORDINATOR'] ,render: () => <PersonnelPage /> },
-  { path: '/admin/org/assignments', systemRoles: ['ADMIN', 'MANAGER'] ,render: () => <OrganizationPage key="assignments" view="assignments" /> },
-  { path: '/admin/org/transfers', systemRoles: ['ADMIN', 'MANAGER'] ,render: () => <OrganizationPage key="transfers" view="transfers" /> },
-  { path: '/admin/planned-work', systemRoles: ['ADMIN', 'MANAGER', 'COORDINATOR'] ,render: () => <PlannedWorkSchedulePage /> },
-  { path: '/admin/customer-site-works', systemRoles: ['ADMIN', 'COORDINATOR', 'MANAGER'] ,render: () => <CustomerSiteWorksPage /> },
-  { path: '/admin/org/contracts', systemRoles: ['ADMIN', 'MANAGER'] ,render: () => <CustomerDirectoryPage /> },
-  { path: '/admin/work-schedule', systemRoles: ['ADMIN'],render: () => <AnnualSchedulePage /> },
-  { path: '/admin/work-schedule/calendar', systemRoles: ['ADMIN', ] ,render: () => <WorkSchedulePage admin /> },
-  { path: '/admin/team-work-schedule', systemRoles: ['ADMIN', 'MANAGER', 'COORDINATOR'] ,render: () => <AnnualSchedulePage team /> },
-  { path: '/admin/team-work-schedule/calendar', systemRoles: ['ADMIN', 'MANAGER', 'COORDINATOR'] ,render: () => <WorkSchedulePage team /> },
-  { path: '/admin/work-schedule/shift-partners', systemRoles: ['ADMIN', ] ,render: () => <ShiftPartnersPage /> },
-  { path: '/admin/radar-cards', systemRoles: ['ADMIN', ] ,render: () => <RadarCardsPage /> },
-  { path: '/admin/ifo', systemRoles: ['ADMIN', ] ,render: () => <IfoPage /> },
-  { path: '/admin/work-execution', systemRoles: ['ADMIN', 'MANAGER'] ,render: () => <WorkExecutionPage /> },
-  { path: '/admin/organization', systemRoles: ['ADMIN', 'MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC', 'MECHANIC', 'SHOP_FOREMAN'] ,render: () => <OrganizationPage key="structure" view="structure" /> },
-  { path: '/admin/users', systemRoles: ['ADMIN'] ,render: () => <UsersPage /> },
-  { path: '/admin/dictionaries/bases', systemRoles: ['ADMIN', ] ,render: () => <BaseCatalogPage /> },
-  { path: '/admin/dictionaries/organization', systemRoles: ['ADMIN', ] ,render: () => <ReferenceDataPage /> },
-  { path: '/admin/users/:id', systemRoles: ['ADMIN', ] ,render: (p) => <UserDetailPage key={p.id} id={Number(p.id)} /> },
-  { path: '/admin/credentials', systemRoles: ['ADMIN', 'MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC', 'MECHANIC', 'SHOP_FOREMAN'] ,render: () => <AdminCredentialsPage /> },
-  { path: '/admin/catalog', systemRoles: ['ADMIN', ] ,render: () => <CatalogPage /> },
-  { path: '/admin/positions', systemRoles: ['ADMIN', ] ,render: () => <PositionsPage /> },
-  { path: '/admin/messages', systemRoles: ['ADMIN', ] ,render: () => <MessagesPage /> },
-  { path: '/admin/notifications', systemRoles: ['ADMIN', ] ,render: () => <NotificationsPage /> },
-  { path: '/admin/audit-log', systemRoles: ['ADMIN', ] ,render: () => <AuditLogPage /> },
-  { path: '/user/work-schedule', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <WorkSchedulePage /> },
-  { path: '/user/work-schedule/calendar', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <WorkSchedulePage /> },
-  { path: '/user/radar-cards', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <RadarCardsPage /> },
-  { path: '/user/ifo', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <IfoPage /> },
-  { path: '/user/dashboard', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <UserDashboardPage /> },
-  { path: '/user/organization', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <OrganizationPage /> },
-  { path: '/user/work-execution', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <WorkExecutionPage /> },
-  { path: '/user/planned-work', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <PlannedWorkSchedulePage /> },
-  { path: '/user/credentials', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <UserCredentialsPage /> },
-  { path: '/user/notifications', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <NotificationsPage /> },
-  { path: '/user/profile', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <ProfilePage /> },
+  { path: '/me/dashboard', systemRoles: WORKSPACE, render: () => <MeDashboard /> },
+  { path: '/me/overview', systemRoles: LEAD, render: () => <OverviewPage /> },
+  { path: '/me/personnel', systemRoles: ['ADMIN', 'MANAGER', 'COORDINATOR'], render: () => <PersonnelPage /> },
+  { path: '/me/assignments', systemRoles: ['ADMIN', 'MANAGER'], render: () => <OrganizationPage key="assignments" view="assignments" /> },
+  { path: '/me/transfers', systemRoles: ['ADMIN', 'MANAGER'], render: () => <OrganizationPage key="transfers" view="transfers" /> },
+  { path: '/me/planned-work', systemRoles: ['ADMIN', 'MANAGER', 'COORDINATOR', 'EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <PlannedWorkSchedulePage /> },
+  { path: '/me/customer-site-works', systemRoles: ['ADMIN', 'COORDINATOR', 'MANAGER'], render: () => <CustomerSiteWorksPage /> },
+  { path: '/me/contracts', systemRoles: ['ADMIN', 'MANAGER'], render: () => <CustomerDirectoryPage /> },
+  { path: '/me/work-schedule', systemRoles: [...SCHEDULE_EDITOR, 'EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <MeWorkScheduleTable /> },
+  { path: '/me/work-schedule/calendar', systemRoles: [...SCHEDULE_EDITOR, 'EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <WorkSchedulePage /> },
+  { path: '/me/radar-cards', systemRoles: ['ADMIN', 'EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <RadarCardsPage /> },
+  { path: '/me/ifo', systemRoles: ['ADMIN', 'EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <IfoPage /> },
+  { path: '/me/work-execution', systemRoles: ['ADMIN', 'MANAGER', 'EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <WorkExecutionPage /> },
+  { path: '/me/organization', systemRoles: WORKSPACE, render: () => <MeOrganization /> },
+  { path: '/me/team-credentials', systemRoles: ['ADMIN', 'MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC', 'MECHANIC', 'SHOP_FOREMAN'], render: () => <AdminCredentialsPage /> },
+  { path: '/me/credentials', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <UserCredentialsPage /> },
+  { path: '/me/notifications', render: () => <NotificationsPage /> },
+  { path: '/me/profile', systemRoles: ['MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC', 'MECHANIC', 'SHOP_FOREMAN', 'EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <ProfilePage /> },
+
+  { path: '/admin/users', systemRoles: ['ADMIN'], render: () => <UsersPage /> },
+  { path: '/admin/users/:id', systemRoles: ['ADMIN'], render: (p) => <UserDetailPage key={p.id} id={Number(p.id)} /> },
+  { path: '/admin/dictionaries/bases', systemRoles: ['ADMIN'], render: () => <BaseCatalogPage /> },
+  { path: '/admin/dictionaries/organization', systemRoles: ['ADMIN'], render: () => <ReferenceDataPage /> },
+  { path: '/admin/catalog', systemRoles: ['ADMIN'], render: () => <CatalogPage /> },
+  { path: '/admin/positions', systemRoles: ['ADMIN'], render: () => <PositionsPage /> },
+  { path: '/admin/messages', systemRoles: ['ADMIN'], render: () => <MessagesPage /> },
+  { path: '/admin/audit-log', systemRoles: ['ADMIN'], render: () => <AuditLogPage /> },
+  { path: '/admin/work-schedule/shift-partners', systemRoles: ['ADMIN'], render: () => <ShiftPartnersPage /> },
+
   { path: '/settings', render: () => <SettingsPage /> },
 ];
+
+/** Старые адресные префиксы → `/me` (или оставшийся `/admin` для админ-операций). */
+const LEGACY_REDIRECTS: Record<string, string> = {
+  '/admin/dashboard': '/me/dashboard',
+  '/admin/overview': '/me/overview',
+  '/admin/org/personnel': '/me/personnel',
+  '/admin/org/assignments': '/me/assignments',
+  '/admin/org/transfers': '/me/transfers',
+  '/admin/org/contracts': '/me/contracts',
+  '/admin/planned-work': '/me/planned-work',
+  '/admin/customer-site-works': '/me/customer-site-works',
+  '/admin/work-schedule': '/me/work-schedule',
+  '/admin/work-schedule/calendar': '/me/work-schedule/calendar',
+  '/admin/team-work-schedule': '/me/work-schedule',
+  '/admin/team-work-schedule/calendar': '/me/work-schedule/calendar',
+  '/admin/radar-cards': '/me/radar-cards',
+  '/admin/ifo': '/me/ifo',
+  '/admin/work-execution': '/me/work-execution',
+  '/admin/organization': '/me/organization',
+  '/admin/credentials': '/me/team-credentials',
+  '/admin/notifications': '/me/notifications',
+  '/user/dashboard': '/me/dashboard',
+  '/user/work-schedule': '/me/work-schedule',
+  '/user/work-schedule/calendar': '/me/work-schedule/calendar',
+  '/user/radar-cards': '/me/radar-cards',
+  '/user/ifo': '/me/ifo',
+  '/user/organization': '/me/organization',
+  '/user/work-execution': '/me/work-execution',
+  '/user/planned-work': '/me/planned-work',
+  '/user/credentials': '/me/credentials',
+  '/user/notifications': '/me/notifications',
+  '/user/profile': '/me/profile',
+};
 
 function Home() {
   const { user } = useAuth();
   return <Redirect to={user ? homePath(user) : '/login'} />;
+}
+
+function LegacyRedirect({ to }: { to: string }) {
+  return <Redirect to={to + window.location.search} />;
 }
 
 export function App() {
@@ -95,6 +149,15 @@ export function App() {
     return (
       <Protected>
         <ChangePasswordPage />
+      </Protected>
+    );
+  }
+
+  const legacy = LEGACY_REDIRECTS[path];
+  if (legacy) {
+    return (
+      <Protected>
+        <LegacyRedirect to={legacy} />
       </Protected>
     );
   }
@@ -110,7 +173,6 @@ export function App() {
     }
   }
 
-  // Любой другой адрес — на главную своей роли
   return (
     <Protected>
       <Home />

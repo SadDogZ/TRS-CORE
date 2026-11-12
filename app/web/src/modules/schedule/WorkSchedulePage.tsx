@@ -2,6 +2,7 @@ import { useEffect, useState, type PointerEvent, type WheelEvent } from 'react';
 import type { UserDto, WorkDayStatus, WorkScheduleIntervalsDto } from '@app/shared';
 import { groupScheduleDates, groupScheduleDays, expandScheduleIntervals, WORK_DAY_STATUSES } from '@app/shared';
 import { api } from '../../core/api.ts';
+import { useCurrentUser } from '../../core/auth.tsx';
 import { useQuery, useAction, invalidate } from '../../core/data.ts';
 import { useRouter } from '../../core/router.tsx';
 import { Alert, SelectField } from '@app/shared/ui';
@@ -9,7 +10,8 @@ import { ScheduleControlPanel, WorkScheduleCalendar, WorkScheduleLegend, getSche
 
 const yearTabs = (year: number) => [year, year + 1, ...Array.from({ length: 5 }, (_, index) => year - index - 1)];
 
-export function WorkSchedulePage({ admin = false, team = false }: { admin?: boolean; team?: boolean }) {
+export function WorkSchedulePage() {
+  const me = useCurrentUser();
   const { search } = useRouter();
   const initialUser = search.get('userId') ?? '';
   const currentYear = new Date().getFullYear();
@@ -42,10 +44,10 @@ export function WorkSchedulePage({ admin = false, team = false }: { admin?: bool
     setDeleted(new Set());
     invalidate('schedule');
   });
-  const canEdit = admin || team;
+  const canEdit = me.systemRoles.some((role) => ['ADMIN', 'MANAGER', 'COORDINATOR'].includes(role));
   const users = useQuery(canEdit ? 'schedule:users' : null, () => api.get<UserDto[]>('/me/work-schedule/users'));
   const path = '/me/work-schedule';
-  const { data, error } = useQuery(`schedule:${admin}:${team}:${selectedUser}:${year}`, () =>
+  const { data, error } = useQuery(`schedule:${canEdit}:${selectedUser}:${year}`, () =>
     api.get<WorkScheduleIntervalsDto>(`${path}/intervals`, { userId: selectedUser, year }),
   );
   const saved = expandScheduleIntervals(data?.intervals ?? [], `${year}-01-01`, `${year}-12-31`);

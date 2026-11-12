@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { WorkScheduleAnnualIntervalsDto } from '@app/shared';
 import { expandScheduleIntervals } from '@app/shared';
 import { api } from '../../core/api.ts';
+import { useCurrentUser } from '../../core/auth.tsx';
 import { useQuery } from '../../core/data.ts';
 import { useRouter } from '../../core/router.tsx';
 import { Alert, TextField } from '@app/shared/ui';
@@ -11,7 +12,9 @@ const holidays = new Set(['01-01', '01-02', '01-03', '01-04', '01-05', '01-06', 
 const weekend = (date: string) => [0, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay());
 const weekday = (date: string) => new Intl.DateTimeFormat('ru-RU', { weekday: 'short', timeZone: 'UTC' }).format(new Date(`${date}T00:00:00Z`));
 
-export function AnnualSchedulePage({ team = false }: { team?: boolean }) {
+export function AnnualSchedulePage() {
+  const me = useCurrentUser();
+  const companyWide = me.systemRoles.includes('ADMIN');
   const { navigate } = useRouter();
   const [year, setYear] = useState(new Date().getFullYear());
   const [collapsed, setCollapsed] = useState(false);
@@ -19,7 +22,7 @@ export function AnnualSchedulePage({ team = false }: { team?: boolean }) {
   const scrollBar = useRef<HTMLDivElement>(null);
   const scrollTrack = useRef<HTMLDivElement>(null);
   const schedulePath = '/me/work-schedule/annual/intervals';
-  const { data, error } = useQuery(`schedule:annual:${team}:${year}`, () =>
+  const { data, error } = useQuery(`schedule:annual:${year}`, () =>
     api.get<WorkScheduleAnnualIntervalsDto>(schedulePath, { year }),
   );
   useEffect(() => {
@@ -50,7 +53,7 @@ export function AnnualSchedulePage({ team = false }: { team?: boolean }) {
 
   return (
     <>
-      <ScheduleControlPanel title={team ? 'Общий график команды' : 'Общий график сотрудников'} subtitle={team ? 'Сотрудники в вашей зоне ответственности' : 'Все сотрудники за выбранный год'} collapsed={collapsed} onToggle={() => setCollapsed((value) => !value)}>
+      <ScheduleControlPanel title={companyWide ? 'Общий график сотрудников' : 'Общий график команды'} subtitle={companyWide ? 'Все сотрудники за выбранный год' : 'Сотрудники в вашей зоне ответственности'} collapsed={collapsed} onToggle={() => setCollapsed((value) => !value)}>
         <div className="row mb"><TextField label="Год" type="number" value={year} onChange={(event) => setYear(Number(event.target.value))} /></div>
       </ScheduleControlPanel>
       {error && <Alert>{error}</Alert>}
@@ -76,7 +79,7 @@ export function AnnualSchedulePage({ team = false }: { team?: boolean }) {
               {data?.rows.map((row) => {
                 const statusByDate = expandScheduleIntervals(row.intervals, `${year}-01-01`, `${year}-12-31`);
                 return <tr key={row.user.id}>
-                  <th className="annual-name annual-person" onClick={() => navigate(`${team ? '/admin/team-work-schedule/calendar' : '/admin/work-schedule/calendar'}?userId=${row.user.id}`)}>{row.user.fullName}</th>
+                  <th className="annual-name annual-person" onClick={() => navigate(`/me/work-schedule/calendar?userId=${row.user.id}`)}>{row.user.fullName}</th>
                   {allDays.map((date) => {
                     const status = statusByDate.get(date);
                     const month = Number(date.slice(5, 7)) - 1;

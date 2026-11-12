@@ -87,9 +87,9 @@ export function useCurrentUser(): UserDto {
 
 export const homePath = (user: UserDto) => {
   const roles = user.systemRoles;
-  if (roles.some((r) => ['ADMIN', 'MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC'].includes(r))) return '/admin/dashboard';
-  if (roles.some((r) => ['MECHANIC', 'SHOP_FOREMAN'].includes(r))) return '/admin/organization';
-  return '/user/dashboard';
+  if (roles.some((r) => ['ADMIN', 'MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC'].includes(r))) return '/me/dashboard';
+  if (roles.some((r) => ['MECHANIC', 'SHOP_FOREMAN'].includes(r))) return '/me/organization';
+  return '/me/dashboard';
 };
 
 /** Только UX: реальная проверка прав выполняется на сервере. */

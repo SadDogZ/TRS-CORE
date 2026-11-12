@@ -22,9 +22,9 @@ export function UserDashboardPage() {
   const firstName = user.fullName.split(' ')[1] || user.fullName;
   return <>
     <PageHeader title={m('hello', { name: firstName })} />
-    {schedule && <section className="panel schedule-home"><div className="row between"><h2 className="panel-title">{m('workSchedule')}</h2><Link to="/user/work-schedule" className="btn btn-sm">{m('openSchedule')}</Link></div><div className="schedule-home-stats">{WORK_DAY_STATUSES.map((status) => <span key={status}><b>{schedule.stats[status]}</b> {m(SCHEDULE_KEYS[status])}</span>)}</div></section>}
+    {schedule && <section className="panel schedule-home"><div className="row between"><h2 className="panel-title">{m('workSchedule')}</h2><Link to="/me/work-schedule" className="btn btn-sm">{m('openSchedule')}</Link></div><div className="schedule-home-stats">{WORK_DAY_STATUSES.map((status) => <span key={status}><b>{schedule.stats[status]}</b> {m(SCHEDULE_KEYS[status])}</span>)}</div></section>}
     <div className="stats">{CREDENTIAL_STATUSES.map((status) => <div key={status} className={`stat ${status}`}><div className="stat-label"><StatusIcon status={status} />{t(STATUS_MESSAGE_KEYS[status])}</div><div className="stat-value">{counts[status]}</div></div>)}</div>
-    <div className="row between mb"><h2 style={{ fontSize: 18, fontWeight: 600 }}>{m('needAttention')}</h2><Link to="/user/credentials" className="btn">{m('allCredentials')}</Link></div>
+    <div className="row between mb"><h2 style={{ fontSize: 18, fontWeight: 600 }}>{m('needAttention')}</h2><Link to="/me/credentials" className="btn">{m('allCredentials')}</Link></div>
     {data.length > 0 && attention.length === 0 ? <Alert kind="success">{m('allCredentialsValid')}</Alert> : <CredentialCards items={attention} emptyText={m('noCredentials')} />}
   </>;
 }

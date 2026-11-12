@@ -41,7 +41,7 @@ export function ProfileMenu() {
             <option value="en">{t('english')}</option>
           </select>
         </label>
-        {!user.systemRoles.includes('ADMIN') && <button type="button" className="menu-item" onClick={() => openRoute('/user/profile')}>{t('profile')}</button>}
+        {!user.systemRoles.includes('ADMIN') && <button type="button" className="menu-item" onClick={() => openRoute('/me/profile')}>{t('profile')}</button>}
         <button type="button" className="menu-item" onClick={() => openRoute('/change-password')}>{t('changePassword')}</button>
         <Link to="/settings" className="menu-item" onClick={() => setOpen(false)}>{t('interfaceSettings')}</Link>
         <button type="button" className="menu-item" onClick={() => logout().then(() => navigate('/login'))}>{t('signOut')}</button>
