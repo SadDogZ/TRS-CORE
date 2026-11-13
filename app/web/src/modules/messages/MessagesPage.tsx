@@ -4,6 +4,7 @@ import { api, errorMessage } from '../../core/api.ts';
 import { Icon, Alert, PageHeader, Pager, SelectField, TextArea, TextField } from '@app/shared/ui';
 import { invalidate, useAction, useQuery } from '../../core/data.ts';
 import { useForm } from '../../core/form.ts';
+import { useCurrentUser } from '../../core/auth.tsx';
 import { formatDateTime } from '../../core/utils.ts';
 import { takeMessageDraft } from './messageDraft.ts';
 
@@ -14,24 +15,44 @@ interface UserOption {
 }
 
 export function MessagesPage() {
+  const me = useCurrentUser();
+  const isAdmin = me.systemRoles.includes('ADMIN');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [peerId, setPeerId] = useState('');
   const form = useForm({ recipient: 'user', userId: '', subject: '', body: '' });
   const { reset } = form;
 
-  // Черновик из карточки сотрудника: получатель, тема и текст уже заполнены
   useEffect(() => {
     const draft = takeMessageDraft();
-    if (draft) reset({ recipient: 'user', userId: String(draft.userId), subject: draft.subject, body: draft.body });
+    if (draft) {
+      reset({ recipient: 'user', userId: String(draft.userId), subject: draft.subject, body: draft.body });
+      setPeerId(String(draft.userId));
+    }
   }, [reset]);
 
-  const options = useQuery('admin:user-options', () => api.get<UserOption[]>('/admin/users/options'));
-  const history = useQuery(`admin:messages:${page}:${pageSize}`, () => api.get<Paginated<MessageDto>>('/admin/messages', { page, pageSize }));
+  const options = useQuery('messages:recipients', () => api.get<UserOption[]>('/me/messages/recipients'), {
+    refreshMs: 30_000,
+  });
+  const history = useQuery(
+    `messages:list:${page}:${pageSize}:${peerId}`,
+    () =>
+      api.get<Paginated<MessageDto>>('/me/messages', {
+        page,
+        pageSize,
+        ...(peerId ? { peerId: Number(peerId) } : {}),
+      }),
+    { refreshMs: 12_000 },
+  );
+  const unread = useQuery('messages:unread', () => api.get<{ count: number }>('/me/messages/unread-count'), {
+    refreshMs: 12_000,
+  });
 
-  const send = useAction((data: unknown) => api.post<{ recipientsCount: number }>('/admin/messages', data), {
+  const send = useAction((data: unknown) => api.post<{ recipientsCount: number }>('/me/messages', data), {
     onSuccess: () => {
       form.reset({ ...form.values, subject: '', body: '' });
-      invalidate('admin:messages');
+      invalidate('messages');
+      invalidate('notifications');
     },
     onError: (err) => form.applyServerErrors(err),
   });
@@ -48,7 +69,14 @@ export function MessagesPage() {
 
   return (
     <>
-      <PageHeader title="Сообщения" subtitle="Сообщение появится в центре уведомлений получателя" />
+      <PageHeader
+        title="Сообщения"
+        subtitle={
+          unread.data?.count
+            ? `Непрочитанных входящих: ${unread.data.count}. Переписка сохраняется в истории.`
+            : 'Личные сообщения в пределах вашей организационной зоны'
+        }
+      />
       <div className="half-cols">
         <form
           noValidate
@@ -59,23 +87,25 @@ export function MessagesPage() {
           }}
         >
           <div className="bold">Новое сообщение</div>
-          <div className="row wrap" role="radiogroup" aria-label="Получатель" style={{ gap: 16 }}>
-            {[
-              ['user', 'Конкретный пользователь'],
-              ['all', 'Все пользователи'],
-            ].map(([value, label]) => (
-              <label key={value} className="check">
-                <input type="radio" name="recipient" value={value} checked={form.values.recipient === value} onChange={() => form.set('recipient', value)} />
-                {label}
-              </label>
-            ))}
-          </div>
-          {form.values.recipient === 'user' ? (
+          {isAdmin && (
+            <div className="row wrap" role="radiogroup" aria-label="Получатель" style={{ gap: 16 }}>
+              {[
+                ['user', 'Конкретный сотрудник'],
+                ['all', 'Все сотрудники'],
+              ].map(([value, label]) => (
+                <label key={value} className="check">
+                  <input type="radio" name="recipient" value={value} checked={form.values.recipient === value} onChange={() => form.set('recipient', value)} />
+                  {label}
+                </label>
+              ))}
+            </div>
+          )}
+          {form.values.recipient === 'user' || !isAdmin ? (
             <SelectField label="Получатель" {...form.field('userId')}>
               <option value="">— выберите сотрудника —</option>
-              {options.data?.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.fullName} ({o.login})
+              {options.data?.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.fullName} ({option.login})
                 </option>
               ))}
             </SelectField>
@@ -94,20 +124,44 @@ export function MessagesPage() {
         </form>
 
         <div className="panel pad">
-          <div className="panel-title">Отправленные</div>
+          <div className="row between wrap" style={{ marginBottom: 8 }}>
+            <div className="panel-title" style={{ margin: 0 }}>История</div>
+            <SelectField
+              label="Диалог"
+              value={peerId}
+              onChange={(event) => {
+                setPeerId(event.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">Все сообщения</option>
+              {options.data?.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.fullName}
+                </option>
+              ))}
+            </SelectField>
+          </div>
+          {history.error && <Alert>{history.error}</Alert>}
+          {history.loading && !history.data && <div className="muted">Загрузка…</div>}
           {history.data?.items.length === 0 && <div className="muted">Сообщений пока нет</div>}
           <ul className="list">
-            {history.data?.items.map((m) => (
-              <li key={m.id}>
+            {history.data?.items.map((message) => (
+              <li key={message.id}>
                 <div className="row wrap">
-                  <span className="bold">{m.subject}</span>
-                  <span className="chip small">{m.isBroadcast ? 'Всем' : (m.recipient?.fullName ?? 'Лично')}</span>
+                  <span className="bold">{message.subject}</span>
+                  <span className="chip small">
+                    {message.isBroadcast ? 'Всем' : message.sender.id === me.id ? `→ ${message.recipient?.fullName ?? '—'}` : `← ${message.sender.fullName}`}
+                  </span>
                 </div>
                 <div className="pre" style={{ margin: '4px 0' }}>
-                  {m.body}
+                  {message.body}
                 </div>
                 <div className="muted small">
-                  {formatDateTime(m.createdAt)} · {m.sender.fullName} · прочитали {m.readCount} из {m.recipientsCount}
+                  {formatDateTime(message.createdAt)} · {message.sender.fullName}
+                  {message.isBroadcast || message.sender.id === me.id
+                    ? ` · прочитали ${message.readCount} из ${message.recipientsCount}`
+                    : ''}
                 </div>
               </li>
             ))}
@@ -119,8 +173,8 @@ export function MessagesPage() {
               pageSize={pageSize}
               sizes={[10, 20, 50]}
               onPage={setPage}
-              onPageSize={(s) => {
-                setPageSize(s);
+              onPageSize={(size) => {
+                setPageSize(size);
                 setPage(1);
               }}
             />

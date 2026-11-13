@@ -51,25 +51,30 @@ const EXCLUSIVE_ORG_ROLES = [
 const INITIAL_BASES = [
   { name: 'Нижневартовск', code: 'NZV_BPO' },
   { name: 'Астрахань', code: 'ASTR_BPO' },
+  { name: 'Усинск', code: 'USI_BPO' },
+  { name: 'Новый Уренгой', code: 'NUR_BPO' },
+  { name: 'Южно-Сахалинск', code: 'YSH_BPO' },
 ] as const;
 
+/** Должности рабочей области TRS/R&M. Имена совпадают с демо-сидом; системная роль задаёт права доступа. */
 const INITIAL_POSITIONS = [
-  ['Координатор', 'COORDINATOR'],
-  ['Техник по бурению 3 категории', 'EMPLOYEE'],
-  ['Техник по бурению 2 категории', 'EMPLOYEE'],
-  ['Техник по бурению 1 категории', 'EMPLOYEE'],
-  ['Инженер по бурению 3 категории', 'EMPLOYEE'],
-  ['Инженер по бурению 2 категории', 'EMPLOYEE'],
-  ['Инженер по бурению 1 категории', 'EMPLOYEE'],
-  ['Инженер по бурению', 'EMPLOYEE'],
+  ['Менеджер БПО', 'MANAGER'],
+  ['Координатор проекта', 'COORDINATOR'],
+  ['Техник по бурению, категория 1', 'EMPLOYEE'],
+  ['Техник по бурению, категория 2', 'EMPLOYEE'],
+  ['Техник по бурению, категория 3', 'EMPLOYEE'],
+  ['Инженер по бурению, категория 1', 'EMPLOYEE'],
+  ['Инженер по бурению, категория 2', 'EMPLOYEE'],
+  ['Инженер по бурению, категория 3', 'EMPLOYEE'],
+  ['Инженер по бурению, без категории', 'EMPLOYEE'],
   ['Руководитель группы', 'EMPLOYEE'],
   ['Старший инженер по бурению', 'EMPLOYEE'],
   ['Старший механик', 'SENIOR_MECHANIC'],
   ['Механик', 'MECHANIC'],
   ['Мастер цеха', 'SHOP_FOREMAN'],
-  ['Слесарь', 'SHOP_EMPLOYEE'],
-  ['Менеджер БПО', 'MANAGER'],
-  ['Инженер по охране труда', 'EMPLOYEE'],
+  ['Слесарь, категория 1', 'SHOP_EMPLOYEE'],
+  ['Слесарь, категория 2', 'SHOP_EMPLOYEE'],
+  ['Слесарь, категория 3', 'SHOP_EMPLOYEE'],
 ] as const;
 
 const INITIAL_WORK_TYPES = [
@@ -150,11 +155,11 @@ export async function initializeOrganizationCatalog() {
       prisma.workStatus.upsert({ where: { code }, update: {}, create: { code, name, sortOrder } }),
     ),
     ...INITIAL_BASES.map(({ name, code }) =>
-      prisma.base.upsert({ where: { code }, update: {}, create: { name, code } }),
+      prisma.base.upsert({ where: { code }, update: { name, isActive: true }, create: { name, code } }),
     ),
     ...INITIAL_POSITIONS.map(([name, roleCode], sortOrder) => prisma.position.upsert({
       where: { name },
-      update: { systemRole: { connect: { code: roleCode } } },
+      update: { systemRole: { connect: { code: roleCode } }, isArchived: false, sortOrder: sortOrder + 1 },
       create: { name, sortOrder: sortOrder + 1, systemRole: { connect: { code: roleCode } } },
     })),
     ...INITIAL_WORK_TYPES.map(({ code, name }) =>

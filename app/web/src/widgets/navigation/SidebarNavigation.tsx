@@ -1,15 +1,28 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import { Icon } from '@app/shared/ui';
+import { api } from '../../core/api.ts';
+import { useQuery } from '../../core/data.ts';
 import { Link } from '../../core/router.tsx';
 import { useLanguage } from '../../core/i18n.tsx';
 import { APP_MESSAGES, appMessage } from '../../core/appMessages.ts';
-import { groupHasActivePath, isNavItemActive, subgroupHasActivePath, type NavGroup } from './navigationConfig';
+import { groupHasActivePath, isNavItemActive, subgroupHasActivePath, type NavGroup, type NavItem } from './navigationConfig';
 
 interface SidebarNavigationProps {
   navGroups: NavGroup[];
   path: string;
   menuOpen: boolean;
   onCloseMenu: () => void;
+}
+
+function NavBadge({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return <span className="count-badge">{count > 99 ? '99+' : count}</span>;
+}
+
+function itemUnread(item: NavItem, notifications: number, messages: number) {
+  if (item.to === '/me/notifications') return notifications;
+  if (item.to === '/me/messages') return messages;
+  return 0;
 }
 
 const DEFAULT_EXPANDED_GROUPS: Record<string, boolean> = { Сотрудники: true };
@@ -33,6 +46,14 @@ export function SidebarNavigation({ navGroups, path, menuOpen, onCloseMenu }: Si
   const m = (key: keyof typeof APP_MESSAGES.ru) => appMessage(language, key);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(DEFAULT_EXPANDED_GROUPS);
   const [expandedSubgroups, setExpandedSubgroups] = useState<Record<string, boolean>>(DEFAULT_EXPANDED_SUBGROUPS);
+  const notificationsUnread = useQuery('notifications:unread', () => api.get<{ count: number }>('/me/notifications/unread-count'), {
+    refreshMs: 30_000,
+  });
+  const messagesUnread = useQuery('messages:unread', () => api.get<{ count: number }>('/me/messages/unread-count'), {
+    refreshMs: 30_000,
+  });
+  const notificationCount = notificationsUnread.data?.count ?? 0;
+  const messageCount = messagesUnread.data?.count ?? 0;
 
   const activeGroupIndex = navGroups.findIndex((group) => groupHasActivePath(group, path));
 
@@ -115,7 +136,8 @@ export function SidebarNavigation({ navGroups, path, menuOpen, onCloseMenu }: Si
                                   onClick={() => onCloseMenu()}
                                 >
                                   <Icon name={item.icon} />
-                                  {item.label}
+                                  <span className="grow">{item.label}</span>
+                                  <NavBadge count={itemUnread(item, notificationCount, messageCount)} />
                                 </Link>
                               ))}
                             </div>
@@ -131,7 +153,8 @@ export function SidebarNavigation({ navGroups, path, menuOpen, onCloseMenu }: Si
                         onClick={() => onCloseMenu()}
                       >
                         <Icon name={item.icon} />
-                        {item.label}
+                        <span className="grow">{item.label}</span>
+                        <NavBadge count={itemUnread(item, notificationCount, messageCount)} />
                       </Link>
                     ))}
                   </div>

@@ -20,15 +20,19 @@ const WPTS_ITEMS: NavItem[] = [
   { to: '/me/radar-cards', label: 'Радар карты', icon: 'warning' },
   { to: '/me/ifo', label: 'IFO', icon: 'overview' },
 ];
-const ROOT_ADMIN_ITEMS: NavItem[] = [
+const GENERAL_ITEMS: NavItem[] = [
   { to: '/me/notifications', label: 'Уведомления', icon: 'bell' },
-  { to: '/admin/messages', label: 'Сообщения', icon: 'send' },
+  { to: '/me/messages', label: 'Сообщения', icon: 'send' },
+];
+const ROOT_ADMIN_ITEMS: NavItem[] = [
+  ...GENERAL_ITEMS,
   { to: '/admin/audit-log', label: 'Аудит и логи', icon: 'history' },
 ];
-const ROOT_USER_ITEMS: NavItem[] = [{ to: '/me/notifications', label: 'Уведомления', icon: 'bell' }];
+const ROOT_USER_ITEMS: NavItem[] = [...GENERAL_ITEMS];
 const SCHEDULE_ADMIN_ITEMS: NavItem[] = [
   { to: '/me/work-schedule', label: 'Таблица', icon: 'table' },
   { to: '/me/work-schedule/calendar', label: 'Редактирование', icon: 'overview' },
+  { to: '/me/work-schedule/generate', label: 'Генерация графика', icon: 'people' },
   { to: '/admin/work-schedule/shift-partners', label: 'Генерация сменщиков', icon: 'people' },
 ];
 const SCHEDULE_USER_ITEMS: NavItem[] = [
@@ -38,6 +42,7 @@ const SCHEDULE_USER_ITEMS: NavItem[] = [
 const SCHEDULE_LEAD_ITEMS: NavItem[] = [
   { to: '/me/work-schedule', label: 'График команды', icon: 'table' },
   { to: '/me/work-schedule/calendar', label: 'Редактировать график', icon: 'overview' },
+  { to: '/me/work-schedule/generate', label: 'Генерация графика', icon: 'people' },
 ];
 const ADMIN_NAV_GROUPS: NavGroup[] = [
   { label: 'Панель управления', icon: 'dashboard', to: '/me/dashboard' },
@@ -81,7 +86,7 @@ const LEAD_PEOPLE_ITEMS: NavItem[] = [
 const CREDENTIAL_LEAD_NAV_GROUPS: NavGroup[] = [
   { label: 'Моя организация', icon: 'people', to: '/me/organization' },
   { label: 'Записи удостоверений', icon: 'badge', to: '/me/team-credentials' },
-  { label: 'Общие разделы', icon: 'grid', items: [{ to: '/settings', label: 'Настройки', icon: 'settings' }] },
+  { label: 'Общие разделы', icon: 'grid', items: [...GENERAL_ITEMS, { to: '/settings', label: 'Настройки', icon: 'settings' }] },
 ];
 
 export function resolveNavGroups(user: UserDto, language: Language): NavGroup[] {
@@ -127,7 +132,7 @@ export function resolveNavGroups(user: UserDto, language: Language): NavGroup[] 
       { label: 'Панель управления', icon: 'dashboard', to: '/me/dashboard' },
       { label: 'Моя организация', icon: 'people', items: orgItems },
       { label: 'Моя команда', icon: 'people', items: teamItems },
-      { label: 'Общие разделы', icon: 'grid', items: [{ to: '/settings', label: 'Настройки', icon: 'settings' }] },
+      { label: 'Общие разделы', icon: 'grid', items: [...GENERAL_ITEMS, { to: '/settings', label: 'Настройки', icon: 'settings' }] },
     ];
   } else if (isCredentialLead) {
     groups = CREDENTIAL_LEAD_NAV_GROUPS;

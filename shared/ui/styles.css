@@ -421,7 +421,8 @@ textarea {
 .schedule-days {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  /* gap: 2px; */
+  user-select: none;
+  touch-action: none;
 }
 
 .schedule-month {
@@ -437,6 +438,48 @@ textarea {
   color: #14532d !important;
   outline: 2px solid #65c985;
   outline-offset: 0;
+}
+
+.schedule-status-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 200px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.schedule-status-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.schedule-status-menu-item:hover,
+.schedule-status-menu-item:focus-visible {
+  background: var(--bg);
+  outline: none;
+}
+
+.schedule-status-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  border: 1px solid rgba(0, 0, 0, 0.12);
 }
 
 .date-range-picker {
@@ -983,6 +1026,13 @@ textarea {
   font-weight: 700;
   line-height: 18px;
   text-align: center;
+}
+
+.nav-link .count-badge,
+.nav-subgroup-title .count-badge {
+  position: static;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .avatar {

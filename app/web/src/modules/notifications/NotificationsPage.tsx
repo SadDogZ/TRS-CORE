@@ -23,8 +23,10 @@ export function NotificationsPage() {
   const [expanded, setExpanded] = useState<number | null>(null);
   const [confirmDismiss, setConfirmDismiss] = useState(false);
 
-  const { data, error } = useQuery(`notifications:list:${kind}:${page}:${pageSize}`, () =>
-    api.get<Paginated<NotificationDto>>('/me/notifications', { page, pageSize, kind: kind === 'ALL' ? undefined : kind }),
+  const { data, error, loading } = useQuery(
+    `notifications:list:${kind}:${page}:${pageSize}`,
+    () => api.get<Paginated<NotificationDto>>('/me/notifications', { page, pageSize, kind: kind === 'ALL' ? undefined : kind }),
+    { refreshMs: 20_000 },
   );
 
   const open = (n: NotificationDto) => {
@@ -68,6 +70,7 @@ export function NotificationsPage() {
             </button>
           ))}
         </div>
+        {loading && !data && <div className="empty">Загрузка…</div>}
         {data?.items.length === 0 && <div className="empty">Уведомлений нет</div>}
         {data?.items.map((n) => (
           <button key={n.id} type="button" className={`note${n.readAt ? '' : ' unread'}`} onClick={() => open(n)}>

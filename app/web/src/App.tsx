@@ -23,6 +23,7 @@ import { IfoPage } from './modules/ifo/IfoPage.tsx';
 import { WorkSchedulePage } from './modules/schedule/WorkSchedulePage.tsx';
 import { AnnualSchedulePage } from './modules/schedule/AnnualSchedulePage.tsx';
 import { ShiftPartnersPage } from './modules/schedule/ShiftPartnersPage.tsx';
+import { ScheduleGeneratePage } from './modules/schedule/ScheduleGeneratePage.tsx';
 import { OrganizationPage } from './modules/organization/OrganizationPage.tsx';
 import { WorkExecutionPage } from './modules/organization/WorkExecutionPage.tsx';
 import { CustomerDirectoryPage } from './modules/organization/CustomerDirectoryPage.tsx';
@@ -84,6 +85,8 @@ const ROUTES: Route[] = [
   { path: '/me/team-credentials', systemRoles: ['ADMIN', 'MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC', 'MECHANIC', 'SHOP_FOREMAN'], render: () => <AdminCredentialsPage /> },
   { path: '/me/credentials', systemRoles: ['EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <UserCredentialsPage /> },
   { path: '/me/notifications', render: () => <NotificationsPage /> },
+  { path: '/me/messages', render: () => <MessagesPage /> },
+  { path: '/me/work-schedule/generate', systemRoles: ['ADMIN', 'MANAGER', 'COORDINATOR'], render: () => <ScheduleGeneratePage /> },
   { path: '/me/profile', systemRoles: ['MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC', 'MECHANIC', 'SHOP_FOREMAN', 'EMPLOYEE', 'SHOP_EMPLOYEE'], render: () => <ProfilePage /> },
 
   { path: '/admin/users', systemRoles: ['ADMIN'], render: () => <UsersPage /> },
@@ -92,7 +95,6 @@ const ROUTES: Route[] = [
   { path: '/admin/dictionaries/organization', systemRoles: ['ADMIN'], render: () => <ReferenceDataPage /> },
   { path: '/admin/catalog', systemRoles: ['ADMIN'], render: () => <CatalogPage /> },
   { path: '/admin/positions', systemRoles: ['ADMIN'], render: () => <PositionsPage /> },
-  { path: '/admin/messages', systemRoles: ['ADMIN'], render: () => <MessagesPage /> },
   { path: '/admin/audit-log', systemRoles: ['ADMIN'], render: () => <AuditLogPage /> },
   { path: '/admin/work-schedule/shift-partners', systemRoles: ['ADMIN'], render: () => <ShiftPartnersPage /> },
 
@@ -119,6 +121,7 @@ const LEGACY_REDIRECTS: Record<string, string> = {
   '/admin/organization': '/me/organization',
   '/admin/credentials': '/me/team-credentials',
   '/admin/notifications': '/me/notifications',
+  '/admin/messages': '/me/messages',
   '/user/dashboard': '/me/dashboard',
   '/user/work-schedule': '/me/work-schedule',
   '/user/work-schedule/calendar': '/me/work-schedule/calendar',

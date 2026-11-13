@@ -33,7 +33,7 @@ export function UserDetailPage({ id }: { id: number }) {
   const isSelf = user.id === me.id;
   const attention = credentials.filter((credential) => !credential.isMarkedForDeletion && (credential.status === 'RED' || credential.status === 'YELLOW'));
   const anyRed = attention.some((credential) => credential.status === 'RED');
-  const writeMessage = () => { setMessageDraft(buildExpiryDraft(user, credentials)); navigate('/admin/messages'); };
+  const writeMessage = () => { setMessageDraft(buildExpiryDraft(user, credentials)); navigate('/me/messages'); };
 
   return <>
     <div className="mb"><Link to="/admin/users" className="btn btn-sm"><Icon name="back" small />{m('employeeDirectory')}</Link></div>

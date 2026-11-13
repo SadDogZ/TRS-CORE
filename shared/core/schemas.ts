@@ -200,6 +200,26 @@ export const shiftPartnersSchema = object({
 });
 export type ShiftPartnersRequest = Infer<typeof shiftPartnersSchema>;
 
+/** Генерация вахтового графика (интервалы WORK/FREE_SHIFT) в зоне менеджера/координатора. */
+export const scheduleGenerateSchema = object(
+  {
+    userIds: matches(
+      (value): value is number[] =>
+        Array.isArray(value) && value.length > 0 && value.every((id) => Number.isInteger(id) && Number(id) >= 1),
+      'Выберите хотя бы одного сотрудника',
+    ),
+    startDate: isoDate,
+    endDate: isoDate,
+    workDays: int({ min: 1, max: 60 }),
+    restDays: int({ min: 1, max: 60 }),
+    travelDays: optional(int({ min: 0, max: 14 })),
+    apply: optional(bool()),
+    force: optional(bool()),
+  },
+  (value) => (value.endDate < value.startDate ? ['endDate', 'Дата окончания раньше даты начала'] : null),
+);
+export type ScheduleGenerateRequest = Infer<typeof scheduleGenerateSchema>;
+
 export const scheduleTemplateSchema = object({
   userId: int({ min: 1 }),
   name: text({ max: 200, message: 'Schedule template name is required' }),

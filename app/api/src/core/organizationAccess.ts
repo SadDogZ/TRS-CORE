@@ -61,6 +61,38 @@ export async function assertManageableUser(actor: User, userId: number): Promise
   if (ids.length && !ids.includes(userId)) throw forbidden();
 }
 
+/**
+ * Кому можно писать сообщения.
+ * null — все активные сотрудники (администратор).
+ * Иначе список userId в зоне: менеджер/координатор — manageableUserIds; сотрудник — коллеги той же базы.
+ */
+export async function messageableUserIds(actor: User): Promise<number[] | null> {
+  const roles = await systemRoleCodes(actor.id);
+  if (roles.includes('ADMIN')) return null;
+  if (roles.some((role) => ['MANAGER', 'COORDINATOR', 'SENIOR_MECHANIC', 'MECHANIC', 'SHOP_FOREMAN'].includes(role))) {
+    return manageableUserIds(actor);
+  }
+  const employee = await prisma.employee.findUnique({ where: { userId: actor.id }, select: { id: true } });
+  if (!employee) return [actor.id];
+  const current = await prisma.employeeAssignment.findUnique({
+    where: { activeEmployeeId: employee.id },
+    select: { baseId: true },
+  });
+  if (!current?.baseId) return [actor.id];
+  const peers = await prisma.employee.findMany({
+    where: { assignments: { some: { activeEmployeeId: { not: null }, baseId: current.baseId } } },
+    select: { userId: true },
+  });
+  return [...new Set([actor.id, ...peers.map(({ userId }) => userId)])];
+}
+
+export async function assertMessageableUser(actor: User, userId: number): Promise<void> {
+  if (userId === actor.id) throw forbidden();
+  const ids = await messageableUserIds(actor);
+  if (ids === null) return;
+  if (!ids.includes(userId)) throw forbidden();
+}
+
 /** Prisma filter for records owned by the caller or employees in their active reporting scope. */
 export async function manageableUserFilter(actor: User): Promise<Prisma.UserWhereInput> {
   const ids = await manageableUserIds(actor);

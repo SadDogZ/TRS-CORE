@@ -11,6 +11,7 @@
     "generate": "prisma generate",
     "seed": "node --env-file=.env prisma/seed.ts",
     "seed:demo": "node --env-file=.env prisma/seed-demo.ts",
+    "seed:demo:verify": "node --env-file=.env prisma/verify-demo-seed.ts",
     "report:manager-gaps": "node --env-file=.env prisma/report-unmapped-manager-assignments.ts",
     "backfill:schedule-intervals": "node --env-file=.env prisma/backfill-work-schedule-intervals.ts",
     "reset": "prisma migrate reset --force",

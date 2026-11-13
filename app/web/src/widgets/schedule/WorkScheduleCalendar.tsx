@@ -1,4 +1,4 @@
-import type { PointerEvent, WheelEvent } from 'react';
+import type { PointerEvent } from 'react';
 import { WORK_DAY_STATUSES, type WorkDayStatus } from '@app/shared';
 import { useLanguage } from '../../core/i18n.tsx';
 import { APP_MESSAGES, APP_WEEKDAYS, appMessage } from '../../core/appMessages.ts';
@@ -10,7 +10,6 @@ interface WorkScheduleCalendarProps {
   selectedDates: string[];
   onPointerDown: (date: string, event: PointerEvent<HTMLButtonElement>) => void;
   onPointerEnter: (date: string) => void;
-  onWheel: (event: WheelEvent<HTMLButtonElement>, date: string) => void;
 }
 
 export function WorkScheduleLegend() {
@@ -29,13 +28,17 @@ export function WorkScheduleLegend() {
   );
 }
 
+function dateFromPoint(clientX: number, clientY: number): string | null {
+  const node = document.elementFromPoint(clientX, clientY)?.closest('[data-schedule-date]');
+  return node?.getAttribute('data-schedule-date') ?? null;
+}
+
 export function WorkScheduleCalendar({
   year,
   statuses,
   selectedDates,
   onPointerDown,
   onPointerEnter,
-  onWheel,
 }: WorkScheduleCalendarProps) {
   const { language } = useLanguage();
   const m = (key: keyof typeof APP_MESSAGES.ru) => appMessage(language, key);
@@ -67,14 +70,23 @@ export function WorkScheduleCalendar({
                   <button
                     key={date}
                     type="button"
+                    data-schedule-date={date}
                     className={`schedule-day${selectedDates.includes(date) ? ' selected' : ''}`}
                     style={{
                       background: status ? WORK_SCHEDULE_COLORS[status] : 'var(--surface)',
                       color: status === 'TRAVEL' || !status ? 'var(--text)' : '#fff',
                     }}
-                    onPointerDown={(event) => onPointerDown(date, event)}
+                    onPointerDown={(event) => {
+                      if (event.button !== 0) return;
+                      onPointerDown(date, event);
+                      event.currentTarget.setPointerCapture?.(event.pointerId);
+                    }}
+                    onPointerMove={(event) => {
+                      if (event.buttons === 0) return;
+                      const next = dateFromPoint(event.clientX, event.clientY);
+                      if (next) onPointerEnter(next);
+                    }}
                     onPointerEnter={() => onPointerEnter(date)}
-                    onWheel={(event) => onWheel(event, date)}
                     title={`${date}: ${status ? WORK_SCHEDULE_LABELS[status] : m('scheduleNotSet')}`}
                   >
                     <span className="schedule-day-number">{Number(date.slice(8, 10))}</span>

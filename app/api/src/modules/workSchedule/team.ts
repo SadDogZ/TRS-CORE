@@ -7,12 +7,10 @@ import { idParam, validQuery, validate } from '../../core/validate.ts';
 import { badRequest, forbidden } from '../../core/errors.ts';
 import { prisma } from '../../core/db.ts';
 import { manageableUserIds, systemRoleCodes } from '../../core/organizationAccess.ts';
-import { deleteScheduleRange, getScheduleIntervals, intervalDto, setScheduleRange } from './schedule.service.ts';
+import { dayEntryDto, deleteScheduleRange, getScheduleIntervals, intervalDto, setScheduleRange } from './schedule.service.ts';
 import { loadAnnualDaily, loadAnnualIntervals, loadDailySchedule, loadIntervalSchedule } from './scheduleQueries.ts';
 
 const deprecateSchedule = deprecateTo('/api/me/work-schedule');
-const toDate = (value: string) => new Date(`${value}T00:00:00.000Z`);
-const dto = (row: { id: number; userId: number; date: Date; status: (typeof WORK_DAY_STATUSES)[number] }) => ({ id: row.id, userId: row.userId, date: row.date.toISOString().slice(0, 10), status: row.status });
 
 async function assertScheduleManager(userId: number) {
   const scheduleManagerRoles = ['MANAGER', 'COORDINATOR'];
@@ -94,8 +92,7 @@ function teamsRoutes() {
     await assertUserInScope(actor.id, userId);
     const input = req.body as { date: string; status: (typeof WORK_DAY_STATUSES)[number] };
     await setScheduleRange(userId, { userId, startDate: input.date, endDate: input.date, status: input.status });
-    const row = await prisma.workScheduleEntry.findUniqueOrThrow({ where: { userId_date: { userId, date: toDate(input.date) } } });
-    res.json(dto(row));
+    res.json(dayEntryDto(userId, input.date, input.status));
   }));
   team.delete('/:userId/:date', h(async (req, res) => {
     const actor = currentUser(req);

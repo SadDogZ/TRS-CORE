@@ -1,21 +1,21 @@
 import { Router } from 'express';
-import { groupScheduleDays, schedulePeriodSchema, scheduleTemplateSchema, shiftPartnersSchema, workScheduleIntervalDeleteSchema, workScheduleIntervalSchema, workScheduleQuerySchema, workScheduleUpdateSchema, WORK_DAY_STATUSES, type SchedulePeriodRequest, type ScheduleTemplateRequest, type ShiftPartnersRequest } from '@app/shared';
+import { groupScheduleDays, scheduleGenerateSchema, schedulePeriodSchema, scheduleTemplateSchema, shiftPartnersSchema, workScheduleIntervalDeleteSchema, workScheduleIntervalSchema, workScheduleQuerySchema, workScheduleUpdateSchema, WORK_DAY_STATUSES, type ScheduleGenerateRequest, type SchedulePeriodRequest, type ScheduleTemplateRequest, type ShiftPartnersRequest } from '@app/shared';
 import { currentUser } from '../../core/auth.ts';
 import { asyncHandler as h } from '../../core/asyncHandler.ts';
 import { adminOnly, deprecateTo, signedIn, type AppModule } from '../../core/module.ts';
 import { idParam, validQuery, validate } from '../../core/validate.ts';
 import { prisma } from '../../core/db.ts';
 import { badRequest } from '../../core/errors.ts';
-import { deleteScheduleRange, getScheduleIntervals, intervalDto, replaceScheduleRanges, setScheduleRange } from './schedule.service.ts';
+import { dayEntryDto, deleteScheduleRange, getScheduleIntervals, intervalDto, replaceScheduleRanges, setScheduleRange } from './schedule.service.ts';
 import { assertCanEditSchedule, assertCanReadSchedule, scheduleUsers, visibleScheduleUserIds } from './scheduleAccess.ts';
 import { loadAnnualDaily, loadAnnualIntervals, loadDailySchedule, loadIntervalSchedule } from './scheduleQueries.ts';
+import { generateScopedSchedule } from './generate.service.ts';
 
 const deprecateSchedule = deprecateTo('/api/me/work-schedule');
 const toDate = (s: string) => new Date(`${s}T00:00:00.000Z`);
 const toIsoDate = (d: Date) => d.toISOString().slice(0, 10);
 const dateFields = (row: any) => ({ ...row, cycleStart: toIsoDate(row.cycleStart), validFrom: toIsoDate(row.validFrom), validTo: row.validTo ? toIsoDate(row.validTo) : null, startDate: row.startDate ? toIsoDate(row.startDate) : undefined, endDate: row.endDate ? toIsoDate(row.endDate) : undefined });
 
-const dto = (row: any) => ({ id: row.id, userId: row.userId, date: row.date.toISOString().slice(0, 10), status: row.status });
 function assertYear(year: number) {
   if (!Number.isInteger(year) || year < 2020 || year > 2100) throw badRequest('Invalid schedule year');
 }
@@ -25,6 +25,9 @@ const yearOf = (value: unknown) => (typeof value === 'number' ? value : new Date
 const own = Router();
 own.use(...signedIn);
 own.get('/users', h(async (req, res) => res.json(await scheduleUsers(await visibleScheduleUserIds(currentUser(req))))));
+own.post('/generate', validate(scheduleGenerateSchema), h(async (req, res) => {
+  res.json(await generateScopedSchedule(currentUser(req), req.body as ScheduleGenerateRequest));
+}));
 own.get('/annual', h(async (req, res) => {
   const year = Number(req.query.year) || new Date().getFullYear();
   assertYear(year);
@@ -71,8 +74,7 @@ own.put('/:userId/:date', validate(workScheduleUpdateSchema), h(async (req, res)
   await assertCanEditSchedule(actor, userId);
   const input = req.body;
   await setScheduleRange(userId, { userId, startDate: input.date, endDate: input.date, status: input.status });
-  const row = await prisma.workScheduleEntry.findUniqueOrThrow({ where: { userId_date: { userId, date: toDate(input.date) } } });
-  res.json(dto(row));
+  res.json(dayEntryDto(userId, input.date, input.status));
 }));
 own.delete('/:userId/:date', h(async (req, res) => {
   const actor = currentUser(req);
@@ -146,5 +148,10 @@ admin.delete('/intervals/:userId', deprecateSchedule, validate(workScheduleInter
   res.status(204).end();
 }));
 admin.delete('/:userId/:date', deprecateSchedule, h(async (req, res) => { const userId = idParam(req, 'userId'); await deleteScheduleRange(userId, req.params.date, req.params.date); res.status(204).end(); }));
-admin.put('/:userId/:date', deprecateSchedule, validate(workScheduleUpdateSchema), h(async (req, res) => { const userId = idParam(req, 'userId'); const input = req.body; await setScheduleRange(userId, { userId, startDate: input.date, endDate: input.date, status: input.status }); const row = await prisma.workScheduleEntry.findUniqueOrThrow({ where: { userId_date: { userId, date: toDate(input.date) } } }); res.json(dto(row)); }));
+admin.put('/:userId/:date', deprecateSchedule, validate(workScheduleUpdateSchema), h(async (req, res) => {
+  const userId = idParam(req, 'userId');
+  const input = req.body;
+  await setScheduleRange(userId, { userId, startDate: input.date, endDate: input.date, status: input.status });
+  res.json(dayEntryDto(userId, input.date, input.status));
+}));
 export const workScheduleModule: AppModule = { name: 'work-schedule', routes: [{ path: '/api/me/work-schedule', router: own }, { path: '/api/admin/work-schedule', router: admin }] };
