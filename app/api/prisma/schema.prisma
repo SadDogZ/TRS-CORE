@@ -32,7 +32,6 @@ model User {
   credentials                       UserCredential[]            @relation("CredentialOwner")
   radarCards                        RadarCard[]
   ifoProposals                      IfoProposal[]               @relation("IfoProposer")
-  workSchedule                      WorkScheduleEntry[]
   workScheduleIntervals              WorkScheduleInterval[]
   scheduleTemplates                 ScheduleTemplate[]
   schedulePeriods                   SchedulePeriod[]
@@ -767,18 +766,6 @@ model SchedulePeriod {
   user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, startDate, endDate])
-}
-
-model WorkScheduleEntry {
-  id        Int           @id @default(autoincrement())
-  userId    Int
-  date      DateTime      @db.Date
-  status    WorkDayStatus
-  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  updatedAt DateTime      @updatedAt
-
-  @@unique([userId, date])
-  @@index([date])
 }
 
 model WorkScheduleInterval {
